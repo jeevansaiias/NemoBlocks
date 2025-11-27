@@ -136,7 +136,7 @@ export function DayDetailModal({ isOpen, onClose, stats }: DayDetailModalProps) 
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="font-normal">
-                        {trade.strategy || "Unknown"}
+                        Custom
                       </Badge>
                     </TableCell>
                     <TableCell>
