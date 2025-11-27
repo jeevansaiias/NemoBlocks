@@ -31,6 +31,7 @@ export interface DaySummary {
   netPL: number;
   tradeCount: number;
   winRate: number;
+  winCount: number;
   maxMargin: number;
   trades: DailyTrade[];
 }

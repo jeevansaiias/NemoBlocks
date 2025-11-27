@@ -34,7 +34,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
 
   // Aggregate trades by day
   const dailyStats = useMemo(() => {
-    const stats = new Map<string, DaySummary & { winCount?: number }>();
+    const stats = new Map<string, DaySummary>();
 
     trades.forEach((trade) => {
       // Handle dateOpened which might be a Date object or string
@@ -59,7 +59,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       const dayStat = stats.get(dateKey)!;
       dayStat.netPL += trade.pl;
       dayStat.tradeCount += 1;
-      if (trade.pl > 0) dayStat.winCount! += 1;
+      if (trade.pl > 0) dayStat.winCount += 1;
       dayStat.maxMargin = Math.max(dayStat.maxMargin, trade.marginReq || 0);
       
       // Map Trade to DailyTrade
@@ -75,9 +75,12 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     });
     
     // Calculate win rates
-    stats.forEach(stat => {
-        const wins = stat.winCount || 0;
-        stat.winRate = stat.tradeCount > 0 ? Math.round((wins / stat.tradeCount) * 100) : 0;
+    stats.forEach((stat) => {
+      const wins = stat.winCount;
+      stat.winRate =
+        stat.tradeCount > 0
+          ? Math.round((wins / stat.tradeCount) * 100)
+          : 0;
     });
 
     return stats;
