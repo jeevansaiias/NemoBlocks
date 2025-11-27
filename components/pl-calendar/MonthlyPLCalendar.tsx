@@ -15,13 +15,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-import { DayStats } from "./DayDetailModal";
+import { DaySummary } from "./DayDetailModal";
 
 interface MonthlyPLCalendarProps {
   currentDate: Date;
   onDateChange: (date: Date) => void;
-  dailyStats: Map<string, DayStats>;
-  onDayClick: (stats: DayStats) => void;
+  dailyStats: Map<string, DaySummary>;
+  onDayClick: (stats: DaySummary) => void;
   maxMarginForPeriod: number;
 }
 

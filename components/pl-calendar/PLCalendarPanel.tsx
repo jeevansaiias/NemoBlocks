@@ -16,7 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Trade } from "@/lib/models/trade";
 import { cn } from "@/lib/utils";
 
-import { DayDetailModal, DayStats } from "./DayDetailModal";
+import { DailyDetailModal, DaySummary } from "./DayDetailModal";
 import { MonthlyPLCalendar } from "./MonthlyPLCalendar";
 import { MonthStats, YearlyPLTable } from "./YearlyPLTable";
 
@@ -27,14 +27,14 @@ interface PLCalendarPanelProps {
 export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<"month" | "year">("month");
-  const [selectedDayStats, setSelectedDayStats] = useState<DayStats | null>(
+  const [selectedDayStats, setSelectedDayStats] = useState<DaySummary | null>(
     null
   );
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Aggregate trades by day
   const dailyStats = useMemo(() => {
-    const stats = new Map<string, DayStats>();
+    const stats = new Map<string, DaySummary & { winCount?: number }>();
 
     trades.forEach((trade) => {
       // Handle dateOpened which might be a Date object or string
@@ -49,9 +49,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
           date: date,
           netPL: 0,
           tradeCount: 0,
+          winRate: 0,
           winCount: 0,
-          lossCount: 0,
-          totalPremium: 0,
           maxMargin: 0,
           trades: [],
         });
@@ -60,11 +59,25 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       const dayStat = stats.get(dateKey)!;
       dayStat.netPL += trade.pl;
       dayStat.tradeCount += 1;
-      if (trade.pl > 0) dayStat.winCount += 1;
-      if (trade.pl < 0) dayStat.lossCount += 1;
-      dayStat.totalPremium += trade.premium || 0;
+      if (trade.pl > 0) dayStat.winCount! += 1;
       dayStat.maxMargin = Math.max(dayStat.maxMargin, trade.marginReq || 0);
-      dayStat.trades.push(trade);
+      
+      // Map Trade to DailyTrade
+      dayStat.trades.push({
+        id: undefined, // Trade model doesn't have ID
+        dateOpened: trade.dateOpened instanceof Date ? trade.dateOpened.toISOString() : trade.dateOpened,
+        strategy: trade.legs || "Custom", // Using legs as strategy proxy if strategy field missing
+        legs: trade.legs || "",
+        premium: trade.premium || 0,
+        margin: trade.marginReq || 0,
+        pl: trade.pl
+      });
+    });
+    
+    // Calculate win rates
+    stats.forEach(stat => {
+        const wins = stat.winCount || 0;
+        stat.winRate = stat.tradeCount > 0 ? Math.round((wins / stat.tradeCount) * 100) : 0;
     });
 
     return stats;
@@ -150,7 +163,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     };
   }, [view, currentDate, dailyStats, monthlyStats]);
 
-  const handleDayClick = (stats: DayStats) => {
+  const handleDayClick = (stats: DaySummary) => {
     setSelectedDayStats(stats);
     setIsModalOpen(true);
   };
@@ -267,10 +280,10 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
         )}
       </div>
 
-      <DayDetailModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        stats={selectedDayStats}
+      <DailyDetailModal
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+        summary={selectedDayStats}
       />
     </div>
   );

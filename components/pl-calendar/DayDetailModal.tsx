@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
-interface DailyTrade {
+export interface DailyTrade {
   id?: string | number;
   dateOpened?: string;
   strategy: string;
@@ -26,7 +26,7 @@ interface DailyTrade {
   pl: number;
 }
 
-interface DaySummary {
+export interface DaySummary {
   date: Date;
   netPL: number;
   tradeCount: number;
@@ -35,7 +35,7 @@ interface DaySummary {
   trades: DailyTrade[];
 }
 
-interface DailyDetailModalProps {
+export interface DailyDetailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   summary: DaySummary | null;
