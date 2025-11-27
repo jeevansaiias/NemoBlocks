@@ -358,7 +358,7 @@ export function DailyDetailModal({
 
           <div className="rounded-xl border border-neutral-800 bg-[#050608] overflow-hidden">
             <div className="overflow-x-auto">
-              <Table className="min-w-[900px]">
+              <Table className="min-w-[1000px]">
               <TableHeader className="sticky top-0 z-10">
                 <TableRow className="bg-neutral-900/90 border-neutral-800 backdrop-blur">
                   <TableHead className="w-[160px] text-[11px] font-semibold uppercase tracking-wide text-neutral-300">
@@ -409,6 +409,17 @@ export function DailyDetailModal({
                       key={t.id ?? idx}
                       className="border-neutral-800 hover:bg-neutral-900/60"
                     >
+                      {/*
+                        Derive a short strategy label: prefer explicit strategy, otherwise use first leg segment.
+                      */}
+                      {(() => {
+                        const strategyLabel =
+                          t.strategy && t.strategy.trim().length > 0
+                            ? t.strategy
+                            : t.legs.split("|")[0]?.trim() || "Custom";
+
+                        return (
+                          <>
                       <TableCell className="font-mono text-xs text-neutral-400 whitespace-nowrap">
                         {time}
                       </TableCell>
@@ -416,7 +427,7 @@ export function DailyDetailModal({
                       {/* Strategy */}
                       <TableCell className="text-xs">
                         <span className="inline-flex items-center rounded-full bg-neutral-900 px-2 py-[2px] text-[11px] font-medium text-neutral-200">
-                          {t.strategy || "Custom"}
+                          {strategyLabel}
                         </span>
                       </TableCell>
 
@@ -454,6 +465,9 @@ export function DailyDetailModal({
                       >
                         {fmtCompactUsd(t.pl)}
                       </TableCell>
+                          </>
+                        );
+                      })()}
                     </TableRow>
                   );
                 })}

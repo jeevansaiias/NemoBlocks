@@ -85,7 +85,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       dayStat.trades.push({
         id: undefined, // Trade model doesn't have ID
         dateOpened: trade.dateOpened instanceof Date ? trade.dateOpened.toISOString() : trade.dateOpened,
-        strategy: trade.legs || "Custom", // Using legs as strategy proxy if strategy field missing
+        strategy: trade.strategy || "Custom",
         legs: trade.legs || "",
         premium: trade.premium || 0,
         margin: trade.marginReq || 0,
