@@ -245,6 +245,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
           winCount: 0,
           maxMargin: 0,
           trades: [],
+          dailyBreakdown: [],
         });
       }
 
@@ -254,6 +255,15 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       weekStat.winCount += stat.winCount;
       weekStat.maxMargin = Math.max(weekStat.maxMargin, stat.maxMargin);
       weekStat.trades.push(...stat.trades);
+      weekStat.dailyBreakdown?.push({
+        date: stat.date,
+        netPL: stat.netPL,
+        tradeCount: stat.tradeCount,
+        winRate:
+          stat.tradeCount > 0
+            ? Math.round((stat.winCount / stat.tradeCount) * 100)
+            : 0,
+      });
     });
 
     weeks.forEach((week) => {
@@ -424,6 +434,14 @@ function WeeklySummaryGrid({
   weeks: WeekSummary[];
   onWeekClick: (week: WeekSummary) => void;
 }) {
+  const formatCompactUsd = (value: number) => {
+    const abs = Math.abs(value);
+    const sign = value < 0 ? "-" : "";
+    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+    if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
+    return `${sign}$${abs.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -460,7 +478,8 @@ function WeeklySummaryGrid({
               <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
                 <span className="text-white/70">{rangeLabel}</span>
                 <span className={week.netPL >= 0 ? "text-emerald-300" : "text-rose-300"}>
-                  {week.netPL >= 0 ? "+" : "-"}${Math.abs(week.netPL).toLocaleString()}
+                  {week.netPL >= 0 ? "+" : "-"}
+                  {formatCompactUsd(Math.abs(week.netPL))}
                 </span>
               </div>
 
@@ -476,7 +495,7 @@ function WeeklySummaryGrid({
                 <div className="rounded-lg bg-black/20 px-3 py-2">
                   <div className="text-[10px] uppercase tracking-wide text-white/50">Max Margin</div>
                   <div className="text-sm font-semibold">
-                    ${week.maxMargin.toLocaleString()}
+                    {formatCompactUsd(week.maxMargin)}
                   </div>
                 </div>
               </div>

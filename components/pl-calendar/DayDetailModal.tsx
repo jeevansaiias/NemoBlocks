@@ -34,6 +34,13 @@ export interface DaySummary {
   winRate: number;
   winCount: number;
   maxMargin: number;
+  // Optional breakout by day (used when showing a week)
+  dailyBreakdown?: {
+    date: Date;
+    netPL: number;
+    tradeCount: number;
+    winRate: number;
+  }[];
   trades: DailyTrade[];
 }
 
@@ -50,6 +57,14 @@ const fmtUsd = (v: number) =>
     maximumFractionDigits: 2,
   })}`;
 
+const fmtCompactUsd = (v: number) => {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}$${abs.toLocaleString()}`;
+};
+
 export function DailyDetailModal({
   open,
   onOpenChange,
@@ -60,6 +75,16 @@ export function DailyDetailModal({
 
   const { date, endDate, netPL, tradeCount, winRate, maxMargin, trades } =
     summary;
+
+  const totalPremium = trades.reduce((sum, t) => sum + (t.premium || 0), 0);
+  const totalMargin = trades.reduce((sum, t) => sum + (t.margin || 0), 0);
+
+  const sortedBreakdown =
+    mode === "week" && summary.dailyBreakdown
+      ? [...summary.dailyBreakdown].sort(
+          (a, b) => a.date.getTime() - b.date.getTime()
+        )
+      : [];
 
   const subtitle =
     mode === "week" ? "Weekly Performance Review" : "Daily Performance Review";
@@ -92,6 +117,14 @@ export function DailyDetailModal({
                 {fmtUsd(netPL)}
               </span>
             </div>
+            <div className="flex items-center gap-2 rounded-full bg-neutral-900 px-3 py-1 text-xs text-neutral-300">
+              <span className="text-neutral-500">Premium</span>
+              <span>{fmtCompactUsd(totalPremium)}</span>
+            </div>
+            <div className="flex items-center gap-2 rounded-full bg-neutral-900 px-3 py-1 text-xs text-neutral-300">
+              <span className="text-neutral-500">Margin</span>
+              <span>{fmtCompactUsd(totalMargin)}</span>
+            </div>
           </div>
         </header>
 
@@ -104,7 +137,7 @@ export function DailyDetailModal({
                 netPL >= 0 ? "text-emerald-400" : "text-red-400"
               )}
             >
-              {fmtUsd(netPL)}
+              {fmtCompactUsd(netPL)}
             </span>
           </MetricCard>
 
@@ -118,10 +151,62 @@ export function DailyDetailModal({
 
           <MetricCard label="Max Margin">
             <span className="text-lg font-semibold">
-              ${maxMargin.toLocaleString()}
+              {fmtCompactUsd(maxMargin)}
             </span>
           </MetricCard>
         </section>
+
+        {/* DAILY BREAKDOWN (week mode) */}
+        {mode === "week" && sortedBreakdown.length > 0 && (
+          <section className="px-6 pb-2">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                Daily breakdown
+              </h4>
+              <span className="text-[11px] text-neutral-500">
+                {sortedBreakdown.length} day{sortedBreakdown.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {sortedBreakdown.map((d) => (
+                <div
+                  key={d.date.toISOString()}
+                  className="rounded-xl border border-neutral-800 bg-neutral-900/60 px-3 py-2"
+                >
+                  <div className="flex items-center justify-between text-xs text-neutral-300">
+                    <span>{format(d.date, "EEE, MMM d")}</span>
+                    <span
+                      className={cn(
+                        "font-semibold",
+                        d.netPL >= 0 ? "text-emerald-400" : "text-red-400"
+                      )}
+                    >
+                      {fmtCompactUsd(d.netPL)}
+                    </span>
+                  </div>
+                  <div className="mt-1 grid grid-cols-3 text-[11px] text-neutral-400">
+                    <div>
+                      <div className="uppercase tracking-wide text-[10px]">Trades</div>
+                      <div className="text-neutral-200 font-semibold">{d.tradeCount}</div>
+                    </div>
+                    <div>
+                      <div className="uppercase tracking-wide text-[10px]">Win %</div>
+                      <div className="text-neutral-200 font-semibold">{d.winRate}%</div>
+                    </div>
+                    <div>
+                      <div className="uppercase tracking-wide text-[10px]">Avg P/L</div>
+                      <div className="text-neutral-200 font-semibold">
+                        {d.tradeCount > 0
+                          ? fmtCompactUsd(d.netPL / d.tradeCount)
+                          : "--"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* TABLE */}
         <section className="px-6 pb-5 pt-2">
@@ -129,8 +214,8 @@ export function DailyDetailModal({
             <Table>
               <TableHeader>
                 <TableRow className="bg-neutral-900/70 border-neutral-800">
-                  <TableHead className="w-[96px] text-xs font-medium text-neutral-400">
-                    Time
+                  <TableHead className="w-[140px] text-xs font-medium text-neutral-400">
+                    {mode === "week" ? "Date / Time" : "Time"}
                   </TableHead>
                   <TableHead className="w-[170px] text-xs font-medium text-neutral-400">
                     Strategy
@@ -164,7 +249,12 @@ export function DailyDetailModal({
                 {trades.map((t, idx) => {
                   const time =
                     t.dateOpened != null
-                      ? format(new Date(t.dateOpened), "HH:mm:ss")
+                      ? format(
+                          new Date(t.dateOpened),
+                          mode === "week" ? "MMM d · HH:mm" : "HH:mm:ss"
+                        )
+                      : mode === "week"
+                      ? "-- · --:--"
                       : "--:--:--";
 
                   return (
@@ -172,7 +262,6 @@ export function DailyDetailModal({
                       key={t.id ?? idx}
                       className="border-neutral-800 hover:bg-neutral-900/60"
                     >
-                      {/* Time */}
                       <TableCell className="font-mono text-xs text-neutral-400 whitespace-nowrap">
                         {time}
                       </TableCell>
