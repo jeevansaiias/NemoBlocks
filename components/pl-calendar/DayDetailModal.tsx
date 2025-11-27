@@ -28,6 +28,7 @@ export interface DailyTrade {
 
 export interface DaySummary {
   date: Date;
+  endDate?: Date;
   netPL: number;
   tradeCount: number;
   winRate: number;
@@ -40,6 +41,7 @@ export interface DailyDetailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   summary: DaySummary | null;
+  mode?: "day" | "week";
 }
 
 const fmtUsd = (v: number) =>
@@ -52,10 +54,19 @@ export function DailyDetailModal({
   open,
   onOpenChange,
   summary,
+  mode = "day",
 }: DailyDetailModalProps) {
   if (!summary) return null;
 
-  const { date, netPL, tradeCount, winRate, maxMargin, trades } = summary;
+  const { date, endDate, netPL, tradeCount, winRate, maxMargin, trades } =
+    summary;
+
+  const subtitle =
+    mode === "week" ? "Weekly Performance Review" : "Daily Performance Review";
+  const formattedDate =
+    mode === "week" && endDate
+      ? `${format(date, "MMM d")} – ${format(endDate, "MMM d, yyyy")}`
+      : format(date, "MMMM d, yyyy");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -64,11 +75,9 @@ export function DailyDetailModal({
         <header className="px-6 pt-5 pb-4 border-b border-neutral-800 flex items-start justify-between gap-4">
           <div>
             <DialogTitle className="text-2xl font-semibold tracking-tight">
-              {format(date, "MMMM d, yyyy")}
+              {formattedDate}
             </DialogTitle>
-            <p className="mt-1 text-xs text-neutral-400">
-              Daily Performance Review
-            </p>
+            <p className="mt-1 text-xs text-neutral-400">{subtitle}</p>
           </div>
 
           <div className="flex flex-wrap gap-3">

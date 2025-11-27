@@ -1,6 +1,6 @@
 "use client";
 
-import { format, getMonth, getYear } from "date-fns";
+import { endOfWeek, format, getMonth, getYear, startOfWeek } from "date-fns";
 import { Table as TableIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -24,12 +24,17 @@ interface PLCalendarPanelProps {
   trades: Trade[];
 }
 
+interface WeekSummary extends DaySummary {
+  endDate: Date;
+}
+
 export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<"month" | "year">("month");
   const [selectedDayStats, setSelectedDayStats] = useState<DaySummary | null>(
     null
   );
+  const [modalMode, setModalMode] = useState<"day" | "week">("day");
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Aggregate trades by day
@@ -166,8 +171,59 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     };
   }, [view, currentDate, dailyStats, monthlyStats]);
 
+  const weeklyStats = useMemo(() => {
+    const weeks = new Map<string, WeekSummary>();
+    const currentMonthStr = format(currentDate, "yyyy-MM");
+
+    dailyStats.forEach((stat, dateKey) => {
+      if (!dateKey.startsWith(currentMonthStr)) return;
+
+      const weekStart = startOfWeek(stat.date);
+      const weekEnd = endOfWeek(stat.date);
+      const weekKey = format(weekStart, "yyyy-MM-dd");
+
+      if (!weeks.has(weekKey)) {
+        weeks.set(weekKey, {
+          date: weekStart,
+          endDate: weekEnd,
+          netPL: 0,
+          tradeCount: 0,
+          winRate: 0,
+          winCount: 0,
+          maxMargin: 0,
+          trades: [],
+        });
+      }
+
+      const weekStat = weeks.get(weekKey)!;
+      weekStat.netPL += stat.netPL;
+      weekStat.tradeCount += stat.tradeCount;
+      weekStat.winCount += stat.winCount;
+      weekStat.maxMargin = Math.max(weekStat.maxMargin, stat.maxMargin);
+      weekStat.trades.push(...stat.trades);
+    });
+
+    weeks.forEach((week) => {
+      week.winRate =
+        week.tradeCount > 0
+          ? Math.round((week.winCount / week.tradeCount) * 100)
+          : 0;
+    });
+
+    return Array.from(weeks.values()).sort(
+      (a, b) => a.date.getTime() - b.date.getTime()
+    );
+  }, [dailyStats, currentDate]);
+
   const handleDayClick = (stats: DaySummary) => {
     setSelectedDayStats(stats);
+    setModalMode("day");
+    setIsModalOpen(true);
+  };
+
+  const handleWeekClick = (stats: WeekSummary) => {
+    setSelectedDayStats(stats);
+    setModalMode("week");
     setIsModalOpen(true);
   };
 
@@ -268,13 +324,22 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       {/* Main Content */}
       <div className="min-h-[500px]">
         {view === "month" ? (
-          <MonthlyPLCalendar
-            currentDate={currentDate}
-            onDateChange={setCurrentDate}
-            dailyStats={dailyStats}
-            onDayClick={handleDayClick}
-            maxMarginForPeriod={maxMarginForMonth}
-          />
+          <div className="space-y-6">
+            <MonthlyPLCalendar
+              currentDate={currentDate}
+              onDateChange={setCurrentDate}
+              dailyStats={dailyStats}
+              onDayClick={handleDayClick}
+              maxMarginForPeriod={maxMarginForMonth}
+            />
+
+            {weeklyStats.length > 0 && (
+              <WeeklySummaryGrid
+                weeks={weeklyStats}
+                onWeekClick={handleWeekClick}
+              />
+            )}
+          </div>
         ) : (
           <YearlyPLTable
             year={getYear(currentDate)}
@@ -287,7 +352,81 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
         open={isModalOpen}
         onOpenChange={setIsModalOpen}
         summary={selectedDayStats}
+        mode={modalMode}
       />
+    </div>
+  );
+}
+
+function WeeklySummaryGrid({
+  weeks,
+  onWeekClick,
+}: {
+  weeks: WeekSummary[];
+  onWeekClick: (week: WeekSummary) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Weekly summary</h3>
+        <p className="text-xs text-muted-foreground">
+          {weeks.length} week{weeks.length === 1 ? "" : "s"} in view
+        </p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {weeks.map((week) => {
+          const rangeLabel = `${format(week.date, "MMM d")} – ${format(
+            week.endDate ?? week.date,
+            "MMM d"
+          )}`;
+
+          return (
+            <button
+              key={week.date.toISOString()}
+              onClick={() => onWeekClick(week)}
+              className={cn(
+                "flex flex-col gap-2 rounded-xl border border-muted-foreground/20 bg-card/60 p-3 text-left transition hover:border-primary/50 hover:shadow-md",
+                week.netPL >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5"
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted-foreground">{rangeLabel}</div>
+                <div
+                  className={cn(
+                    "text-sm font-semibold",
+                    week.netPL >= 0 ? "text-emerald-500" : "text-rose-500"
+                  )}
+                >
+                  {week.netPL >= 0 ? "+" : ""}
+                  ${week.netPL.toLocaleString()}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                <div className="rounded-md bg-background/50 px-2 py-1">
+                  <div className="text-[11px] uppercase tracking-wide">Trades</div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {week.tradeCount}
+                  </div>
+                </div>
+                <div className="rounded-md bg-background/50 px-2 py-1">
+                  <div className="text-[11px] uppercase tracking-wide">Win Rate</div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {week.winRate}%
+                  </div>
+                </div>
+                <div className="rounded-md bg-background/50 px-2 py-1">
+                  <div className="text-[11px] uppercase tracking-wide">Max Margin</div>
+                  <div className="text-sm font-semibold text-foreground">
+                    ${week.maxMargin.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
