@@ -18,7 +18,8 @@ import { cn } from "@/lib/utils";
 
 import { DailyDetailModal, DaySummary } from "./DayDetailModal";
 import { MonthlyPLCalendar } from "./MonthlyPLCalendar";
-import { MonthStats, YearlyPLTable } from "./YearlyPLTable";
+import { MonthStats } from "./YearlyPLTable";
+import { YearHeatmap, YearlyCalendarSnapshot } from "./YearHeatmap";
 
 interface PLCalendarPanelProps {
   trades: Trade[];
@@ -126,6 +127,58 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
 
     return stats;
   }, [trades, currentDate]);
+
+  // Aggregate trades by year/month for the heatmap
+  const yearlySnapshot = useMemo<YearlyCalendarSnapshot>(() => {
+    const yearMap = new Map<number, Map<number, { netPL: number; trades: number; wins: number }>>();
+
+    trades.forEach((trade) => {
+      const date = trade.dateOpened instanceof Date ? trade.dateOpened : new Date(trade.dateOpened);
+      const y = getYear(date);
+      const m = getMonth(date);
+
+      if (!yearMap.has(y)) yearMap.set(y, new Map());
+      const monthMap = yearMap.get(y)!;
+      if (!monthMap.has(m)) monthMap.set(m, { netPL: 0, trades: 0, wins: 0 });
+      const entry = monthMap.get(m)!;
+      entry.netPL += trade.pl;
+      entry.trades += 1;
+      if (trade.pl > 0) entry.wins += 1;
+    });
+
+    const years = Array.from(yearMap.entries())
+      .map(([year, monthsMap]) => {
+        const months = Array.from(monthsMap.entries()).map(([month, vals]) => ({
+          month,
+          netPL: vals.netPL,
+          trades: vals.trades,
+          winRate: vals.trades > 0 ? Math.round((vals.wins / vals.trades) * 100) : 0,
+        }));
+
+        const total = months.reduce(
+          (acc, m) => {
+            acc.netPL += m.netPL;
+            acc.trades += m.trades;
+            acc.wins += Math.round((m.winRate / 100) * m.trades);
+            return acc;
+          },
+          { netPL: 0, trades: 0, wins: 0 }
+        );
+
+        return {
+          year,
+          months,
+          total: {
+            netPL: total.netPL,
+            trades: total.trades,
+            winRate: total.trades > 0 ? Math.round((total.wins / total.trades) * 100) : 0,
+          },
+        };
+      })
+      .sort((a, b) => b.year - a.year);
+
+    return { years };
+  }, [trades]);
 
   // Calculate max margin for the current month to scale utilization bars
   const maxMarginForMonth = useMemo(() => {
@@ -341,9 +394,15 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
             )}
           </div>
         ) : (
-          <YearlyPLTable
-            year={getYear(currentDate)}
-            monthlyStats={monthlyStats}
+          <YearHeatmap
+            data={yearlySnapshot}
+            onMonthClick={(year, monthIndex) => {
+              const newDate = new Date(currentDate);
+              newDate.setFullYear(year);
+              newDate.setMonth(monthIndex);
+              setCurrentDate(newDate);
+              setView("month");
+            }}
           />
         )}
       </div>
@@ -374,51 +433,49 @@ function WeeklySummaryGrid({
         </p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      <div className="flex flex-wrap gap-3">
         {weeks.map((week) => {
           const rangeLabel = `${format(week.date, "MMM d")} – ${format(
             week.endDate ?? week.date,
             "MMM d"
           )}`;
 
+          const tone =
+            week.netPL > 0
+              ? "from-emerald-500/20 to-emerald-500/5 border-emerald-900/40 text-emerald-100"
+              : week.netPL < 0
+              ? "from-rose-500/20 to-rose-500/5 border-rose-900/40 text-rose-100"
+              : "from-zinc-700/10 to-zinc-800/10 border-zinc-700/40 text-zinc-200";
+
           return (
             <button
               key={week.date.toISOString()}
               onClick={() => onWeekClick(week)}
               className={cn(
-                "flex flex-col gap-2 rounded-xl border border-muted-foreground/20 bg-card/60 p-3 text-left transition hover:border-primary/50 hover:shadow-md",
-                week.netPL >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5"
+                "min-w-[240px] flex-1 rounded-2xl border px-4 py-3 text-left transition hover:-translate-y-0.5 hover:shadow-lg",
+                "bg-gradient-to-br",
+                tone
               )}
             >
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-muted-foreground">{rangeLabel}</div>
-                <div
-                  className={cn(
-                    "text-sm font-semibold",
-                    week.netPL >= 0 ? "text-emerald-500" : "text-rose-500"
-                  )}
-                >
-                  {week.netPL >= 0 ? "+" : ""}
-                  ${week.netPL.toLocaleString()}
-                </div>
+              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
+                <span className="text-white/70">{rangeLabel}</span>
+                <span className={week.netPL >= 0 ? "text-emerald-300" : "text-rose-300"}>
+                  {week.netPL >= 0 ? "+" : "-"}${Math.abs(week.netPL).toLocaleString()}
+                </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                <div className="rounded-md bg-background/50 px-2 py-1">
-                  <div className="text-[11px] uppercase tracking-wide">Trades</div>
-                  <div className="text-sm font-semibold text-foreground">
-                    {week.tradeCount}
-                  </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-white/80">
+                <div className="rounded-lg bg-black/20 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-white/50">Trades</div>
+                  <div className="text-sm font-semibold">{week.tradeCount}</div>
                 </div>
-                <div className="rounded-md bg-background/50 px-2 py-1">
-                  <div className="text-[11px] uppercase tracking-wide">Win Rate</div>
-                  <div className="text-sm font-semibold text-foreground">
-                    {week.winRate}%
-                  </div>
+                <div className="rounded-lg bg-black/20 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-white/50">Win Rate</div>
+                  <div className="text-sm font-semibold">{week.winRate}%</div>
                 </div>
-                <div className="rounded-md bg-background/50 px-2 py-1">
-                  <div className="text-[11px] uppercase tracking-wide">Max Margin</div>
-                  <div className="text-sm font-semibold text-foreground">
+                <div className="rounded-lg bg-black/20 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-white/50">Max Margin</div>
+                  <div className="text-sm font-semibold">
                     ${week.maxMargin.toLocaleString()}
                   </div>
                 </div>
