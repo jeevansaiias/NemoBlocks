@@ -49,6 +49,18 @@ export function AvgPLDashboard({ trades }: { trades: Trade[] }) {
     [trades, startingBalance, withdrawalPct, withdrawOnlyIfProfitable]
   );
 
+  const totals = useMemo(() => {
+    const totalWithdrawals = withdrawalResult.rows.reduce(
+      (sum, r) => sum + r.withdrawal,
+      0
+    );
+    const months = withdrawalResult.rows.length || 1;
+    return {
+      totalWithdrawals,
+      avgWithdrawal: totalWithdrawals / months,
+    };
+  }, [withdrawalResult.rows]);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -168,7 +180,11 @@ export function AvgPLDashboard({ trades }: { trades: Trade[] }) {
           </div>
 
           <div className="text-right text-sm font-semibold">
-            Final Ending Balance: {fmtUsd(withdrawalResult.finalBalance)}
+            <div>Final Ending Balance: {fmtUsd(withdrawalResult.finalBalance)}</div>
+            <div className="text-xs text-muted-foreground">
+              Total Withdrawals: {fmtUsd(totals.totalWithdrawals)} • Avg / Month:{" "}
+              {fmtUsd(totals.avgWithdrawal)}
+            </div>
           </div>
         </CardContent>
       </Card>
