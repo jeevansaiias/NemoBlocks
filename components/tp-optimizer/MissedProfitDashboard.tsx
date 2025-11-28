@@ -25,7 +25,7 @@ const fmtUsd = (v: number) =>
 
 export function MissedProfitDashboard({ trades }: MissedProfitDashboardProps) {
   const result = analyzeMissedProfit(trades);
-  // Show trades ordered by largest missed $ first.
+  // Show trades ordered by largest missed $ first (full list, no top-N limit).
   const missedTradesSorted = [...result.details].sort(
     (a, b) => b.missedDollar - a.missedDollar
   );
