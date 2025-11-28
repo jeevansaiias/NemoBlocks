@@ -137,6 +137,7 @@ export function DailyDetailModal({
 
   const { date, endDate, netPL, tradeCount, winRate, maxMargin, trades } = summary;
 
+  // Keep large currency values compact in the UI while retaining precision for tooltips/exports.
   const totalPremium = trades.reduce((sum, t) => sum + (t.premium || 0), 0);
   const totalMargin = trades.reduce((sum, t) => sum + (t.margin || 0), 0);
 
