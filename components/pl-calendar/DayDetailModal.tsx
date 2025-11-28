@@ -45,6 +45,7 @@ export interface DaySummary {
   cumulativePL?: number;
   rollingWeeklyPL?: number;
   calendarWeekPL?: number;
+  streak?: number;
   // Optional breakout by day (used when showing a week)
   dailyBreakdown?: {
     date: Date;

@@ -49,6 +49,27 @@ export function MonthlyPLCalendar({
     return `${sign}$${abs.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
   };
 
+  const fmtShortUsd = (v: number) => {
+    const sign = v < 0 ? "-" : "";
+    const abs = Math.abs(v);
+    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
+    return `${sign}$${abs.toFixed(0)}`;
+  };
+
+  const getDailyPLClass = (pl: number, absMax: number) => {
+    if (absMax <= 0) return "";
+    const intensity = Math.min(1, Math.abs(pl) / absMax);
+    if (pl >= 0) {
+      if (intensity < 0.33) return "text-emerald-300";
+      if (intensity < 0.66) return "text-emerald-400";
+      return "text-emerald-500";
+    }
+    if (intensity < 0.33) return "text-rose-300";
+    if (intensity < 0.66) return "text-rose-400";
+    return "text-rose-500";
+  };
+
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
   const startDate = startOfWeek(monthStart);
@@ -82,6 +103,11 @@ export function MonthlyPLCalendar({
     };
   });
 
+  const absMaxDailyPL = Math.max(
+    1,
+    ...dayEntries.map((e) => Math.abs(e.stats?.netPL ?? 0))
+  );
+
   // chunk into weeks of 7
   const weeks: typeof dayEntries[] = [];
   for (let i = 0; i < dayEntries.length; i += 7) {
@@ -91,18 +117,16 @@ export function MonthlyPLCalendar({
   const weekPLs = weeks.map((week) =>
     week.reduce((sum, entry) => sum + (entry.stats?.netPL ?? 0), 0)
   );
+  const medianWeekPL = (() => {
+    const vals = [...weekPLs].filter((v) => !Number.isNaN(v)).sort((a, b) => a - b);
+    if (vals.length === 0) return 0;
+    const mid = Math.floor(vals.length / 2);
+    return vals.length % 2 === 0 ? (vals[mid - 1] + vals[mid]) / 2 : vals[mid];
+  })();
   const maxWeekAbsPL =
     weekPLs.length > 0
       ? Math.max(1, ...weekPLs.map((v) => Math.abs(v)))
       : 1;
-
-  const fmtShortUsd = (v: number) => {
-    const sign = v < 0 ? "-" : "";
-    const abs = Math.abs(v);
-    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
-    if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
-    return `${sign}$${abs.toFixed(0)}`;
-  };
 
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -144,12 +168,42 @@ export function MonthlyPLCalendar({
         <div className="space-y-1 bg-muted/20 p-1">
           {weeks.map((week, idx) => {
             const weekPL = weekPLs[idx];
+            const regime =
+              weekPL > 2 * medianWeekPL
+                ? "strong"
+                : weekPL < -1.5 * medianWeekPL
+                ? "weak"
+                : "normal";
             const weekBg =
-              weekPL > 0
+              regime === "strong"
                 ? "bg-emerald-500/5"
-                : weekPL < 0
+                : regime === "weak"
                 ? "bg-rose-500/5"
                 : "bg-muted/40";
+
+            const stratAgg: Record<string, { pl: number; trades: number }> = {};
+            week.forEach((entry) => {
+              if (!entry.stats) return;
+              entry.stats.trades.forEach((t) => {
+                const key = t.strategy || "Unknown";
+                if (!stratAgg[key]) stratAgg[key] = { pl: 0, trades: 0 };
+                stratAgg[key].pl += t.pl;
+                stratAgg[key].trades += 1;
+              });
+            });
+            const topStrategies = Object.entries(stratAgg)
+              .sort((a, b) => Math.abs(b[1].pl) - Math.abs(a[1].pl))
+              .slice(0, 3);
+
+            const points = week
+              .map((entry) => entry.stats?.cumulativePL)
+              .filter((v): v is number => typeof v === "number");
+            const minP = points.length ? Math.min(...points) : 0;
+            const maxP = points.length ? Math.max(...points) : 1;
+            const normPoints =
+              points.length && maxP !== minP
+                ? points.map((p) => (p - minP) / (maxP - minP))
+                : points.map(() => 0.5);
             return (
               <div
                 key={`week-${idx}`}
@@ -183,19 +237,29 @@ export function MonthlyPLCalendar({
                               {stats.tradeCount}t
                             </span>
                           )}
+                          {stats?.streak && Math.abs(stats.streak) >= 2 && (
+                            <span
+                              className={cn(
+                                "text-[10px] font-semibold",
+                                stats.streak > 0 ? "text-emerald-300" : "text-rose-300"
+                              )}
+                            >
+                              {stats.streak > 0 ? `+${stats.streak}` : stats.streak}
+                            </span>
+                          )}
                         </div>
 
                         {stats && (
                           <div className="mt-2 flex flex-col gap-1">
                             <div className="flex items-center justify-between">
-                              <div
-                                className={cn(
-                                  "text-center text-sm font-bold",
-                                  stats.netPL >= 0 ? "text-emerald-500" : "text-rose-500"
-                                )}
-                              >
-                                {formatCompactUsd(stats.netPL)}
-                              </div>
+                      <div
+                        className={cn(
+                          "text-center text-sm font-bold",
+                          getDailyPLClass(stats.netPL, absMaxDailyPL)
+                        )}
+                      >
+                        {formatCompactUsd(stats.netPL)}
+                      </div>
                               <span className="text-[11px] text-muted-foreground">
                                 {weeklyMode === "trailing7" ? "7d" : "Wk"}{" "}
                                 {formatCompactUsd(
@@ -223,7 +287,7 @@ export function MonthlyPLCalendar({
                     );
                   })}
                 </div>
-                <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
                   <span className="uppercase tracking-wide">Week {idx + 1}</span>
                   <span
                     className={cn(
@@ -251,6 +315,32 @@ export function MonthlyPLCalendar({
                       }}
                     />
                   </div>
+                  {topStrategies.length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+                      {topStrategies.map(([name, info]) => (
+                        <span key={name}>
+                          {name}{" "}
+                          <span className={info.pl >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                            {fmtShortUsd(info.pl)}
+                          </span>{" "}
+                          ({info.trades}t)
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {normPoints.length > 0 && (
+                    <svg className="ml-auto h-4 w-24" viewBox="0 0 100 20" preserveAspectRatio="none">
+                      <polyline
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        points={normPoints
+                          .map((p, i) => `${(i / Math.max(1, normPoints.length - 1)) * 100},${(1 - p) * 20}`)
+                          .join(" ")}
+                        className="text-emerald-400"
+                      />
+                    </svg>
+                  )}
                 </div>
               </div>
             );

@@ -132,6 +132,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     const rollingWindow: string[] = [];
     const rollingWeeklyMap = new Map<string, number>();
     const weekMap = new Map<string, number>();
+    let currentStreak = 0;
     sortedKeys.forEach((key) => {
       const stat = stats.get(key)!;
       cumulative += stat.netPL;
@@ -159,6 +160,16 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       const d = new Date(key);
       const weekKey = `${getISOWeekYear(d)}-${getISOWeek(d)}`;
       weekMap.set(weekKey, (weekMap.get(weekKey) ?? 0) + stat.netPL);
+
+      // streaks across all days
+      if (stat.netPL > 0) {
+        currentStreak = currentStreak > 0 ? currentStreak + 1 : 1;
+      } else if (stat.netPL < 0) {
+        currentStreak = currentStreak < 0 ? currentStreak - 1 : -1;
+      } else {
+        currentStreak = 0;
+      }
+      stat.streak = currentStreak;
     });
 
     // assign calendarWeekPL
