@@ -1,16 +1,18 @@
 "use client";
 
+// PLCalendarPanel: Main component for the P/L Calendar feature
 import { endOfWeek, format, getMonth, getYear, startOfWeek } from "date-fns";
-import { Table as TableIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Download, Filter, Table as TableIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Trade } from "@/lib/models/trade";
@@ -18,8 +20,8 @@ import { cn } from "@/lib/utils";
 
 import { DailyDetailModal, DaySummary } from "./DayDetailModal";
 import { MonthlyPLCalendar } from "./MonthlyPLCalendar";
-import { MonthStats } from "./YearlyPLTable";
 import { YearHeatmap, YearlyCalendarSnapshot } from "./YearHeatmap";
+import { MonthStats } from "./YearlyPLTable";
 
 interface PLCalendarPanelProps {
   trades: Trade[];
@@ -50,12 +52,32 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   );
   const [modalMode, setModalMode] = useState<"day" | "week">("day");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedStrategy, setSelectedStrategy] = useState<string>("all");
+  const [drawdownThreshold, setDrawdownThreshold] = useState(10);
+  const [stressRange, setStressRange] = useState<{ p5: number; p50: number; p95: number } | null>(
+    null
+  );
+
+  const strategies = useMemo(() => {
+    const s = new Set<string>();
+    trades.forEach((t) => {
+      if (t.strategy) s.add(t.strategy);
+      else s.add("Custom");
+    });
+    return ["all", ...Array.from(s).sort()];
+  }, [trades]);
+
+  const filteredTrades = useMemo(() => {
+    if (selectedStrategy === "all") return trades;
+    return trades.filter((t) => (t.strategy || "Custom") === selectedStrategy);
+  }, [trades, selectedStrategy]);
 
   // Aggregate trades by day
+  // This useMemo calculates daily stats including win/loss counts and rolling metrics
   const dailyStats = useMemo(() => {
     const stats = new Map<string, DaySummary>();
 
-    trades.forEach((trade) => {
+    filteredTrades.forEach((trade) => {
       // Handle dateOpened which might be a Date object or string
       const date = trade.dateOpened instanceof Date 
         ? trade.dateOpened 
@@ -102,15 +124,45 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
           : 0;
     });
 
+    // Compute cumulative equity and rolling drawdowns
+    const sortedKeys = Array.from(stats.keys()).sort();
+    let cumulative = 0;
+    let peak = 0;
+    const rollingWindow: string[] = [];
+    const rollingWeeklyMap = new Map<string, number>();
+    sortedKeys.forEach((key) => {
+      const stat = stats.get(key)!;
+      cumulative += stat.netPL;
+      peak = Math.max(peak, cumulative);
+      const drawdownPct = peak > 0 ? ((cumulative - peak) / peak) * 100 : 0;
+      stat.drawdownPct = drawdownPct;
+      stat.cumulativePL = cumulative;
+
+      // rolling 7-day return
+      rollingWindow.push(key);
+      while (rollingWindow.length > 0) {
+        const first = new Date(rollingWindow[0]);
+        const current = new Date(key);
+        if ((current.getTime() - first.getTime()) / (1000 * 60 * 60 * 24) > 6) {
+          rollingWindow.shift();
+        } else {
+          break;
+        }
+      }
+      const rollingSum = rollingWindow.reduce((sum, k) => sum + (stats.get(k)?.netPL ?? 0), 0);
+      rollingWeeklyMap.set(key, rollingSum);
+      stat.rollingWeeklyPL = rollingSum;
+    });
+
     return stats;
-  }, [trades]);
+  }, [filteredTrades]);
 
   // Aggregate trades by month for the current year
   const monthlyStats = useMemo(() => {
     const stats = new Map<number, MonthStats>();
     const year = getYear(currentDate);
 
-    trades.forEach((trade) => {
+    filteredTrades.forEach((trade) => {
       const date = trade.dateOpened instanceof Date 
         ? trade.dateOpened 
         : new Date(trade.dateOpened);
@@ -139,13 +191,13 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     });
 
     return stats;
-  }, [trades, currentDate]);
+  }, [filteredTrades, currentDate]);
 
   // Aggregate trades by year/month for the heatmap
   const yearlySnapshot = useMemo<YearlyCalendarSnapshot>(() => {
     const yearMap = new Map<number, Map<number, { netPL: number; trades: number; wins: number }>>();
 
-    trades.forEach((trade) => {
+    filteredTrades.forEach((trade) => {
       const date = trade.dateOpened instanceof Date ? trade.dateOpened : new Date(trade.dateOpened);
       const y = getYear(date);
       const m = getMonth(date);
@@ -191,7 +243,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       .sort((a, b) => b.year - a.year);
 
     return { years };
-  }, [trades]);
+  }, [filteredTrades]);
 
   // Calculate max margin for the current month to scale utilization bars
   const maxMarginForMonth = useMemo(() => {
@@ -207,14 +259,77 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     return max;
   }, [dailyStats, currentDate]);
 
+  // Simple Monte Carlo stress on current month daily P/L
+  useEffect(() => {
+    const currentMonthStr = format(currentDate, "yyyy-MM");
+    const dailyPl: number[] = [];
+    dailyStats.forEach((stat, key) => {
+      if (key.startsWith(currentMonthStr)) dailyPl.push(stat.netPL);
+    });
+    if (dailyPl.length === 0) {
+      setStressRange(null);
+      return;
+    }
+    const runs = 200;
+    const horizon = Math.max(5, dailyPl.length);
+    const outcomes: number[] = [];
+    for (let i = 0; i < runs; i++) {
+      let total = 0;
+      for (let h = 0; h < horizon; h++) {
+        const pick = dailyPl[Math.floor(Math.random() * dailyPl.length)];
+        total += pick;
+      }
+      outcomes.push(total);
+    }
+    outcomes.sort((a, b) => a - b);
+    const pct = (p: number) => outcomes[Math.floor((p / 100) * outcomes.length)];
+    setStressRange({ p5: pct(5), p50: pct(50), p95: pct(95) });
+  }, [dailyStats, currentDate]);
+
+  const exportMonthCsv = () => {
+    const currentMonthStr = format(currentDate, "yyyy-MM");
+    const headers = ["Date", "NetPL", "Trades", "WinRate", "DrawdownPct", "RollingWeeklyPL"];
+    const rows: string[] = [];
+    dailyStats.forEach((stat, key) => {
+      if (key.startsWith(currentMonthStr)) {
+        rows.push(
+          [
+            key,
+            stat.netPL,
+            stat.tradeCount,
+            stat.winRate,
+            stat.drawdownPct ?? "",
+            stat.rollingWeeklyPL ?? "",
+          ].join(",")
+        );
+      }
+    });
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pl-calendar-${currentMonthStr}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportMonthPng = () => {
+    window.print();
+  };
+
   // Calculate period stats (Month or Year)
   const periodStats = useMemo(() => {
     let netPL = 0;
     let tradeCount = 0;
     let winCount = 0;
+    let rolling7d = 0;
 
     if (view === "month") {
       const currentMonthStr = format(currentDate, "yyyy-MM");
+      const keysInMonth = Array.from(dailyStats.keys())
+        .filter((k) => k.startsWith(currentMonthStr))
+        .sort();
       dailyStats.forEach((stat, dateKey) => {
         if (dateKey.startsWith(currentMonthStr)) {
           netPL += stat.netPL;
@@ -222,6 +337,12 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
           winCount += stat.winCount;
         }
       });
+      // rolling 7d sum using last seven days in month
+      const recentKeys = keysInMonth.slice(-7);
+      rolling7d = recentKeys.reduce(
+        (sum, key) => sum + (dailyStats.get(key)?.netPL ?? 0),
+        0
+      );
     } else {
       monthlyStats.forEach((stat) => {
         netPL += stat.netPL;
@@ -234,6 +355,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       netPL,
       tradeCount,
       winRate: tradeCount > 0 ? Math.round((winCount / tradeCount) * 100) : 0,
+      rolling7d,
     };
   }, [view, currentDate, dailyStats, monthlyStats]);
 
@@ -361,8 +483,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       </div>
 
       {/* Controls */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <Tabs
             value={view}
             onValueChange={(v) => setView(v as "month" | "year")}
@@ -373,9 +495,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
               <TabsTrigger value="year">Year</TabsTrigger>
             </TabsList>
           </Tabs>
-        </div>
 
-        <div className="flex items-center gap-2">
           <Select
             value={getYear(currentDate).toString()}
             onValueChange={(val) => {
@@ -395,6 +515,43 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
               ))}
             </SelectContent>
           </Select>
+
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="Strategy" />
+              </SelectTrigger>
+              <SelectContent>
+                {strategies.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s === "all" ? "All strategies" : s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-muted-foreground">Drawdown &gt; %</label>
+            <input
+              type="number"
+              className="w-20 rounded border bg-background px-2 py-1 text-sm"
+              value={drawdownThreshold}
+              onChange={(e) => setDrawdownThreshold(Number(e.target.value) || 0)}
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={exportMonthCsv}>
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportMonthPng}>
+              <TableIcon className="mr-2 h-4 w-4" />
+              Print/PNG
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -408,6 +565,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
               dailyStats={dailyStats}
               onDayClick={handleDayClick}
               maxMarginForPeriod={maxMarginForMonth}
+              drawdownThreshold={drawdownThreshold}
             />
 
             {weeklyStats.length > 0 && (
@@ -430,6 +588,44 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
           />
         )}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Period snapshot & stress</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-5">
+          <div>
+            <p className="text-xs text-muted-foreground">Net P/L</p>
+            <p className={cn("text-lg font-semibold", periodStats.netPL >= 0 ? "text-emerald-500" : "text-rose-500")}>
+              {formatCompactUsd(periodStats.netPL)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Trades</p>
+            <p className="text-lg font-semibold">{periodStats.tradeCount}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Win Rate</p>
+            <p className="text-lg font-semibold">{periodStats.winRate}%</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Rolling 7d</p>
+            <p className={cn("text-lg font-semibold", periodStats.rolling7d >= 0 ? "text-emerald-500" : "text-rose-500")}>
+              {formatCompactUsd(periodStats.rolling7d)}
+            </p>
+          </div>
+          {stressRange && (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">MC stress (p5 / p50 / p95)</p>
+              <p className="text-sm font-semibold">
+                <span className="text-rose-500">{formatCompactUsd(stressRange.p5)}</span>{" "}
+                / {formatCompactUsd(stressRange.p50)}{" "}
+                <span className="text-emerald-500">{formatCompactUsd(stressRange.p95)}</span>
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <DailyDetailModal
         open={isModalOpen}

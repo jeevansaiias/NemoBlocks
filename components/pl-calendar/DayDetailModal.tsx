@@ -41,6 +41,9 @@ export interface DaySummary {
   winRate: number;
   winCount: number;
   maxMargin: number;
+  drawdownPct?: number;
+  cumulativePL?: number;
+  rollingWeeklyPL?: number;
   // Optional breakout by day (used when showing a week)
   dailyBreakdown?: {
     date: Date;

@@ -23,6 +23,7 @@ interface MonthlyPLCalendarProps {
   dailyStats: Map<string, DaySummary>;
   onDayClick: (stats: DaySummary) => void;
   maxMarginForPeriod: number;
+  drawdownThreshold?: number;
 }
 
 export function MonthlyPLCalendar({
@@ -31,6 +32,7 @@ export function MonthlyPLCalendar({
   dailyStats,
   onDayClick,
   maxMarginForPeriod,
+  drawdownThreshold = 10,
 }: MonthlyPLCalendarProps) {
   const formatCompactUsd = (value: number) => {
     const abs = Math.abs(value);
@@ -97,6 +99,10 @@ export function MonthlyPLCalendar({
             const dateKey = format(day, "yyyy-MM-dd");
             const stats = dailyStats.get(dateKey);
             const isCurrentMonth = isSameMonth(day, monthStart);
+            const isDrawdown =
+              stats && stats.drawdownPct !== undefined
+                ? stats.drawdownPct <= -Math.abs(drawdownThreshold)
+                : false;
             
             // Calculate utilization percentage relative to the max margin seen in the period
             // If maxMarginForPeriod is 0, avoid division by zero
@@ -112,7 +118,8 @@ export function MonthlyPLCalendar({
                 className={cn(
                   "relative flex min-h-[100px] flex-col justify-between bg-background p-2 transition-colors hover:bg-muted/50",
                   !isCurrentMonth && "bg-muted/5 text-muted-foreground",
-                  stats && "cursor-pointer"
+                  stats && "cursor-pointer",
+                  isDrawdown && "ring-2 ring-rose-500/60"
                 )}
               >
                 <div className="flex items-start justify-between">
@@ -133,13 +140,20 @@ export function MonthlyPLCalendar({
 
                 {stats && (
                   <div className="mt-2 flex flex-col gap-1">
-                    <div
-                      className={cn(
-                        "text-center text-sm font-bold",
-                        stats.netPL >= 0 ? "text-emerald-500" : "text-rose-500"
+                    <div className="flex items-center justify-between">
+                      <div
+                        className={cn(
+                          "text-center text-sm font-bold",
+                          stats.netPL >= 0 ? "text-emerald-500" : "text-rose-500"
+                        )}
+                      >
+                        {formatCompactUsd(stats.netPL)}
+                      </div>
+                      {stats.rollingWeeklyPL !== undefined && (
+                        <span className="text-[11px] text-muted-foreground">
+                          7d {formatCompactUsd(stats.rollingWeeklyPL)}
+                        </span>
                       )}
-                    >
-                      {formatCompactUsd(stats.netPL)}
                     </div>
                     
                     {/* Utilization Bar */}
