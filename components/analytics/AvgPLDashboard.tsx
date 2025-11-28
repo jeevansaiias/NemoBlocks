@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,12 +36,27 @@ export function AvgPLDashboard({ trades }: { trades: Trade[] }) {
   const weeklyStats = computeAvgWinLoss(weekly);
   const monthlyStats = computeAvgWinLoss(monthly);
 
-  const [startingBalance, setStartingBalance] = useState(100000);
+  const inferredStartingBalance = useMemo(() => {
+    if (trades.length === 0) return 100000;
+    const sorted = [...trades].sort((a, b) => {
+      const da = (a.dateClosed as Date) || (a.dateOpened as Date);
+      const db = (b.dateClosed as Date) || (b.dateOpened as Date);
+      return new Date(da).getTime() - new Date(db).getTime();
+    });
+    const first = sorted[0];
+    return Math.max(0, first.fundsAtClose ?? 100000);
+  }, [trades]);
+
+  const [startingBalance, setStartingBalance] = useState(inferredStartingBalance);
   const [withdrawalPct, setWithdrawalPct] = useState(30);
   const [withdrawOnlyIfProfitable, setWithdrawOnlyIfProfitable] = useState(true);
   const [withdrawalMode, setWithdrawalMode] = useState<"percent" | "fixed">("percent");
   const [fixedWithdrawal, setFixedWithdrawal] = useState(1000);
   const [resetMode, setResetMode] = useState(false);
+
+  useEffect(() => {
+    setStartingBalance(inferredStartingBalance);
+  }, [inferredStartingBalance]);
 
   const withdrawalResult = useMemo(
     () =>
