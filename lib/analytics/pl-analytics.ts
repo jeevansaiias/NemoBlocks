@@ -19,7 +19,8 @@ export interface DailyPnLPoint {
 
 export interface EquityPoint {
   date: string; // YYYY-MM-DD
-  equity: number;
+  equityBeforeWithdrawal: number;
+  equityAfterWithdrawal: number;
   dayPL: number;
   withdrawal: number;
 }
@@ -47,7 +48,8 @@ export interface MonthlyPLRow {
   month: string; // YYYY-MM
   pl: number;
   withdrawal: number;
-  endingBalance: number;
+  startingEquity: number;
+  endingEquity: number;
 }
 
 export interface WithdrawalSimulationResult {
@@ -143,75 +145,84 @@ export function computeAvgPLStats(daily: DailyPnLPoint[]): AvgPLStats {
 /**
  * Simulate daily equity and monthly withdrawals using raw dollar P/L from the log.
  */
-export function simulateWithdrawals(
-  daily: DailyPnLPoint[],
-  config: WithdrawalConfig
-): WithdrawalSimulationResult & CapitalPathResult {
-  const {
-    startingBalance,
-    mode,
-    fixedAmount = 0,
-    percent = 0,
-    onlyIfProfitable,
-  } = config;
+export function computeEquityAndWithdrawals(
+  trades: RawTrade[],
+  options: {
+    startingCapital: number;
+    withdrawalMode: WithdrawalConfig["mode"];
+    withdrawalPercent?: number;
+    fixedWithdrawal?: number;
+    withdrawProfitableMonthsOnly?: boolean;
+    normalizeToOneLot?: boolean;
+  }
+): {
+  daily: EquityPoint[];
+  monthly: MonthlyPLRow[];
+  startingCapital: number;
+  endingCapital: number;
+  totalPL: number;
+  totalWithdrawn: number;
+  maxDrawdownPct: number;
+  cagrPct: number;
+} {
+  // Derive normalization factor based on max contracts magnitude.
+  const maxContracts = Math.max(
+    0,
+    ...trades.map((t) => (t.contracts ? Math.abs(t.contracts) : 0))
+  );
+  const factor =
+    options.normalizeToOneLot && maxContracts > 0 ? 1 / maxContracts : 1;
 
-  let equity = startingBalance;
-  let monthPL = 0;
-  let totalWithdrawn = 0;
-  let peakEquity = startingBalance;
+  const startingCapital = options.startingCapital * factor;
+
+  // Aggregate daily P/L (already normalized if factor < 1).
+  const dailyPL = buildDailyPnL(
+    trades.map((t) => ({
+      ...t,
+      pl: t.pl * factor,
+      premium: t.premium !== undefined ? t.premium * factor : t.premium,
+      marginReq:
+        t.marginReq !== undefined ? t.marginReq * factor : t.marginReq,
+    }))
+  );
+
+  const days = [...dailyPL].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  let equity = startingCapital;
+  let peakEquity = startingCapital;
   let maxDrawdownPct = 0;
+  let totalWithdrawn = 0;
+  const daily: EquityPoint[] = [];
 
-  const equityCurve: EquityPoint[] = [];
-  const monthlyRows: MonthlyPLRow[] = [];
+  // Build monthly buckets before withdrawals.
+  const monthlyBuckets = new Map<
+    string,
+    { monthPL: number; dayIndices: number[]; startEquity?: number }
+  >();
 
-  const days = [...daily].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-  const applyWithdrawalForMonth = (month: string, isLast: boolean) => {
-    if (!isLast) return 0;
-    if (onlyIfProfitable && monthPL <= 0) return 0;
-
-    let withdrawal = 0;
-    switch (mode) {
-      case "percent": {
-        withdrawal = Math.min(equity, equity * (percent / 100));
-        break;
-      }
-      case "fixed": {
-        withdrawal = Math.min(Math.max(0, fixedAmount), equity);
-        break;
-      }
-      case "resetToStart": {
-        if (equity > startingBalance) {
-          withdrawal = Math.min(equity - startingBalance, equity);
-        }
-        break;
-      }
-      case "none":
-      default:
-        withdrawal = 0;
+  days.forEach((d, idx) => {
+    const key = d.date.slice(0, 7);
+    if (!monthlyBuckets.has(key)) {
+      monthlyBuckets.set(key, { monthPL: 0, dayIndices: [], startEquity: undefined });
     }
+    const bucket = monthlyBuckets.get(key)!;
+    bucket.monthPL += d.pl;
+    bucket.dayIndices.push(idx);
+  });
 
-    equity -= withdrawal;
-    totalWithdrawn += withdrawal;
-
-    monthlyRows.push({
-      month,
-      pl: monthPL,
-      withdrawal,
-      endingBalance: equity,
-    });
-
-    monthPL = 0; // reset for next month
-    return withdrawal;
-  };
-
+  // Iterate days to build equityBefore/After and handle withdrawals at month end.
   days.forEach((day, idx) => {
     const dayMonth = day.date.slice(0, 7);
-    const nextMonth = idx < days.length - 1 ? days[idx + 1].date.slice(0, 7) : dayMonth;
-    const isLastDayOfMonth = dayMonth !== nextMonth || idx === days.length - 1;
+    const bucket = monthlyBuckets.get(dayMonth)!;
+    if (bucket.startEquity === undefined) {
+      bucket.startEquity = equity;
+    }
 
-    equity += day.pl;
-    monthPL += day.pl;
+    const equityBefore = equity;
+    const equityAfterPL = equityBefore + day.pl;
+    equity = equityAfterPL;
 
     peakEquity = Math.max(peakEquity, equity);
     if (peakEquity > 0) {
@@ -219,36 +230,105 @@ export function simulateWithdrawals(
       maxDrawdownPct = Math.min(maxDrawdownPct, dd);
     }
 
-    const withdrawalToday = applyWithdrawalForMonth(dayMonth, isLastDayOfMonth);
+    const nextMonth =
+      idx < days.length - 1 ? days[idx + 1].date.slice(0, 7) : dayMonth;
+    const isLastDayOfMonth = dayMonth !== nextMonth || idx === days.length - 1;
 
-    equityCurve.push({
+    let withdrawal = 0;
+    if (isLastDayOfMonth) {
+      const monthPL = bucket.monthPL;
+      const equityBeforeWithdrawal = equity;
+    const mode = options.withdrawalMode;
+      const profitOk =
+        !options.withdrawProfitableMonthsOnly || monthPL > 0;
+
+      switch (mode) {
+        case "percent": {
+          if (profitOk) {
+            withdrawal = Math.max(
+              0,
+              Math.min(equityBeforeWithdrawal, monthPL * (options.withdrawalPercent ?? 0))
+            );
+          }
+          break;
+        }
+        case "fixed": {
+          if (profitOk) {
+            withdrawal = Math.max(
+              0,
+              Math.min(equityBeforeWithdrawal, options.fixedWithdrawal ?? 0)
+            );
+          }
+          break;
+        }
+        case "resetToStart": {
+          if (equityBeforeWithdrawal > startingCapital) {
+            withdrawal = Math.min(
+              equityBeforeWithdrawal - startingCapital,
+              equityBeforeWithdrawal
+            );
+          }
+          break;
+        }
+        case "none":
+        default:
+          withdrawal = 0;
+      }
+
+      equity = equityBeforeWithdrawal - withdrawal;
+      totalWithdrawn += withdrawal;
+    }
+
+    daily.push({
       date: day.date,
-      equity,
       dayPL: day.pl,
-      withdrawal: withdrawalToday,
+      equityBeforeWithdrawal: equityAfterPL,
+      equityAfterWithdrawal: equity,
+      withdrawal,
     });
   });
 
-  const finalEndingBalance = equity;
-  const distinctMonths = new Set(monthlyRows.map((r) => r.month)).size || 1;
-  const avgWithdrawalPerMonth = totalWithdrawn / distinctMonths;
+  // Build monthly rows with withdrawals recorded on last day of month.
+  const monthly: MonthlyPLRow[] = [];
+  const monthKeys = Array.from(monthlyBuckets.keys()).sort();
+  monthKeys.forEach((month) => {
+    const bucket = monthlyBuckets.get(month)!;
+    const daysInMonth = bucket.dayIndices.map((i) => daily[i]);
+    const withdrawal = daysInMonth.reduce((s, d) => s + (d.withdrawal || 0), 0);
+    const endingEquity = daysInMonth[daysInMonth.length - 1]?.equityAfterWithdrawal ?? 0;
+    monthly.push({
+      month,
+      pl: bucket.monthPL,
+      withdrawal,
+      startingEquity: bucket.startEquity ?? startingCapital,
+      endingEquity,
+    });
+  });
+
+  const totalPL = daily.reduce((s, d) => s + d.dayPL, 0);
+  const endingCapital = daily.length > 0 ? daily[daily.length - 1].equityAfterWithdrawal : startingCapital;
+
+  // Invariant check (debug only; keep silent if matches).
+  const lhs = startingCapital + totalPL;
+  const rhs = endingCapital + totalWithdrawn;
+  if (Math.abs(lhs - rhs) > 1e-3) {
+    console.warn("Equity/withdrawal invariant mismatch", { lhs, rhs });
+  }
 
   const cagrPct = computeCAGR(
-    startingBalance,
-    finalEndingBalance,
+    startingCapital,
+    endingCapital,
     days.length > 0 ? new Date(days[0].date) : null,
     days.length > 0 ? new Date(days[days.length - 1].date) : null
   );
 
   return {
-    monthly: monthlyRows,
-    finalEndingBalance,
+    daily,
+    monthly,
+    startingCapital,
+    endingCapital,
+    totalPL,
     totalWithdrawn,
-    avgWithdrawalPerMonth,
-    equityCurve,
-    startingCapital: startingBalance,
-    endingCapital: finalEndingBalance,
-    totalPL: finalEndingBalance - startingBalance,
     maxDrawdownPct,
     cagrPct,
   };

@@ -10,14 +10,12 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AvgPLStats,
-  CapitalPathResult,
   RawTrade,
-  WithdrawalConfig,
-  WithdrawalMode,
   buildDailyPnL,
   computeAvgPLStats,
+  computeEquityAndWithdrawals,
   normalizeTradesToOneLot,
-  simulateWithdrawals,
+  WithdrawalMode,
 } from "@/lib/analytics/pl-analytics";
 import { cn } from "@/lib/utils";
 
@@ -39,26 +37,25 @@ export function PLAnalyticsPanel({ trades }: PLAnalyticsPanelProps) {
   const [onlyIfProfitable, setOnlyIfProfitable] = useState(true);
   const [normalizeOneLot, setNormalizeOneLot] = useState(false);
 
-  const normalizedTrades = useMemo(
-    () => (normalizeOneLot ? normalizeTradesToOneLot(trades) : trades),
-    [normalizeOneLot, trades]
-  );
+  const normalizedTrades = useMemo(() => {
+    return normalizeOneLot ? normalizeTradesToOneLot(trades) : trades;
+  }, [normalizeOneLot, trades]);
 
   const daily = useMemo(() => buildDailyPnL(normalizedTrades), [normalizedTrades]);
   const avgStats = useMemo(() => computeAvgPLStats(daily), [daily]);
 
-  const withdrawalConfig: WithdrawalConfig = useMemo(
-    () => ({
-      startingBalance,
-      mode: withdrawMode,
-      percent: withdrawPercent,
-      fixedAmount: withdrawFixed,
-      onlyIfProfitable,
-    }),
-    [startingBalance, withdrawMode, withdrawPercent, withdrawFixed, onlyIfProfitable]
+  const sim = useMemo(
+    () =>
+      computeEquityAndWithdrawals(normalizedTrades, {
+        startingCapital: startingBalance,
+        withdrawalMode: withdrawMode,
+        withdrawalPercent: withdrawPercent / 100,
+        fixedWithdrawal: withdrawFixed,
+        withdrawProfitableMonthsOnly: onlyIfProfitable,
+        normalizeToOneLot: normalizeOneLot,
+      }),
+    [normalizedTrades, startingBalance, withdrawMode, withdrawPercent, withdrawFixed, onlyIfProfitable, normalizeOneLot]
   );
-
-  const sim = useMemo(() => simulateWithdrawals(daily, withdrawalConfig), [daily, withdrawalConfig]);
 
   if (trades.length === 0) {
     return (
@@ -175,7 +172,7 @@ function StatsGrid({ stats }: { stats: AvgPLStats }) {
   );
 }
 
-function MonthlyTable({ sim }: { sim: ReturnType<typeof simulateWithdrawals> }) {
+function MonthlyTable({ sim }: { sim: ReturnType<typeof computeEquityAndWithdrawals> }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -202,7 +199,7 @@ function MonthlyTable({ sim }: { sim: ReturnType<typeof simulateWithdrawals> }) 
                   {fmtUsd(row.pl)}
                 </TableCell>
                 <TableCell className="text-right font-mono text-amber-300">{fmtUsd(row.withdrawal)}</TableCell>
-                <TableCell className="text-right font-mono">{fmtUsd(row.endingBalance)}</TableCell>
+                <TableCell className="text-right font-mono">{fmtUsd(row.endingEquity)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -212,12 +209,12 @@ function MonthlyTable({ sim }: { sim: ReturnType<typeof simulateWithdrawals> }) 
   );
 }
 
-function EquitySummary({ sim }: { sim: CapitalPathResult }) {
+function EquitySummary({ sim }: { sim: ReturnType<typeof computeEquityAndWithdrawals> }) {
   const items = [
     { label: "Ending Capital", value: sim.endingCapital },
     { label: "Total P/L", value: sim.totalPL },
+    { label: "Total Withdrawn", value: sim.totalWithdrawn },
     { label: "Max Drawdown", value: `${(sim.maxDrawdownPct * 100).toFixed(2)}%` },
-    { label: "CAGR", value: `${(sim.cagrPct * 100).toFixed(2)}%` },
   ];
   return (
     <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -235,8 +232,8 @@ function EquitySummary({ sim }: { sim: CapitalPathResult }) {
   );
 }
 
-function EquityTable({ sim }: { sim: CapitalPathResult }) {
-  const rows = sim.equityCurve.slice(-30); // show recent 30 days
+function EquityTable({ sim }: { sim: ReturnType<typeof computeEquityAndWithdrawals> }) {
+  const rows = sim.daily.slice(-30); // show recent 30 days
   if (rows.length === 0) return null;
   return (
     <div className="space-y-2">
@@ -261,7 +258,7 @@ function EquityTable({ sim }: { sim: CapitalPathResult }) {
                 <TableCell className="text-right font-mono text-amber-300">
                   {p.withdrawal > 0 ? fmtUsd(p.withdrawal) : "$0"}
                 </TableCell>
-                <TableCell className="text-right font-mono">{fmtUsd(p.equity)}</TableCell>
+                <TableCell className="text-right font-mono">{fmtUsd(p.equityAfterWithdrawal)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
