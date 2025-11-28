@@ -57,17 +57,18 @@ export function simulateEquityCurve(
 
   const monthKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`;
   let currentMonth = sorted.length > 0 ? monthKey(new Date(sorted[0].dateOpened)) : "";
+  let monthStartEquity = startingCapital;
 
-  const applyWithdrawal = () => {
+  const applyWithdrawal = (monthProfit: number) => {
     if (withdrawalMode === "none") return;
-    const profitable = equity > startingCapital;
+    const profitable = monthProfit > 0;
     if (withdrawOnlyIfProfitable && !profitable) return;
 
     let withdrawal = 0;
     if (withdrawalMode === "percent") {
-      withdrawal = equity * withdrawalPct;
+      withdrawal = monthProfit * withdrawalPct;
     } else if (withdrawalMode === "fixed") {
-      withdrawal = Math.min(equity, Math.max(0, fixedAmount));
+      withdrawal = Math.min(Math.max(0, fixedAmount), monthProfit, equity);
     } else if (withdrawalMode === "reset") {
       withdrawal = equity > startingCapital ? equity - startingCapital : 0;
     }
@@ -80,7 +81,9 @@ export function simulateEquityCurve(
     const d = (trade.dateClosed as Date) || (trade.dateOpened as Date);
     const month = monthKey(d);
     if (currentMonth !== month && currentMonth !== "") {
-      applyWithdrawal();
+      const monthProfit = equity - monthStartEquity;
+      applyWithdrawal(monthProfit);
+      monthStartEquity = equity;
     }
     currentMonth = month;
 
@@ -106,7 +109,8 @@ export function simulateEquityCurve(
   });
 
   // Final month withdrawal
-  applyWithdrawal();
+  const finalMonthProfit = equity - monthStartEquity;
+  applyWithdrawal(finalMonthProfit);
 
   const endingCapital = equity;
   const portfolioPL = endingCapital + totalWithdrawals - startingCapital;
