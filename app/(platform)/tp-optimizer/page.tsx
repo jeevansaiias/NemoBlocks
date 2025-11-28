@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { MultiTPOptimizer } from "@/components/tp-optimizer/MultiTPOptimizer";
 import { MissedProfitDashboard } from "@/components/tp-optimizer/MissedProfitDashboard";
 import { NoActiveBlock } from "@/components/no-active-block";
 import { WorkspaceShell } from "@/components/workspace-shell";
@@ -97,7 +98,10 @@ export default function TpOptimizerPage() {
           No trades available for this block yet.
         </div>
       ) : (
-        <MissedProfitDashboard trades={missedProfitTrades} />
+        <div className="space-y-6">
+          <MissedProfitDashboard trades={missedProfitTrades} />
+          <MultiTPOptimizer trades={missedProfitTrades} />
+        </div>
       )}
     </WorkspaceShell>
   );
