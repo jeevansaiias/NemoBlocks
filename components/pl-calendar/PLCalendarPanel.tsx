@@ -56,9 +56,23 @@ const formatCompactUsd = (value: number) => {
   return `${sign}$${abs.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 };
 
+const getTradeLots = (trade: Trade) => {
+  const raw = trade.numContracts ?? 1;
+  const lots = Math.abs(raw);
+  return lots > 0 ? lots : 1;
+};
+
+const getSizedPL = (trade: Trade, sizingMode: SizingMode) => {
+  if (sizingMode === "actual") return trade.pl;
+  const lots = getTradeLots(trade);
+  return trade.pl / lots;
+};
+
 interface WeekSummary extends DaySummary {
   endDate: Date;
 }
+
+type SizingMode = "actual" | "normalized";
 
 export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -75,6 +89,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   );
   const [weeklyMode, setWeeklyMode] = useState<"trailing7" | "calendarWeek">("trailing7");
   const [heatmapMetric, setHeatmapMetric] = useState<"pl" | "rom">("pl");
+  const [sizingMode, setSizingMode] = useState<SizingMode>("actual");
   const { settings: calendarSettings, setSettings: setCalendarSettings } = usePLCalendarSettings();
 
   const strategies = useMemo(() => {
@@ -92,6 +107,20 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       selectedStrategies.includes(t.strategy || "Custom")
     );
   }, [trades, selectedStrategies]);
+
+  // Persist sizing mode
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("plCalendarSizingMode");
+    if (saved === "actual" || saved === "normalized") {
+      setSizingMode(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("plCalendarSizingMode", sizingMode);
+  }, [sizingMode]);
 
   // Aggregate trades by day
   // This useMemo calculates daily stats including win/loss counts and rolling metrics
@@ -121,7 +150,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       }
 
       const dayStat = stats.get(dateKey)!;
-      dayStat.netPL += trade.pl;
+      const sizedPL = getSizedPL(trade, sizingMode);
+      dayStat.netPL += sizedPL;
       dayStat.tradeCount += 1;
       if (trade.pl > 0) dayStat.winCount += 1;
       dayStat.maxMargin = Math.max(dayStat.maxMargin, trade.marginReq || 0);
@@ -129,7 +159,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       
       // Map Trade to DailyTrade, keeping the actual opened timestamp (date + time).
       const marginUsed = trade.marginReq || 0;
-      const romPct = marginUsed > 0 ? (trade.pl / marginUsed) * 100 : undefined;
+      const romPct = marginUsed > 0 ? (sizedPL / marginUsed) * 100 : undefined;
       const openedAt = (() => {
         const [h = "0", m = "0", s = "0"] = (trade.timeOpened || "00:00:00").split(":");
         const dt = new Date(date);
@@ -143,7 +173,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
         legs: trade.legs || "",
         premium: trade.premium || 0,
         margin: marginUsed,
-        pl: trade.pl,
+        pl: sizedPL,
         romPct,
       });
     });
@@ -215,7 +245,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     });
 
     return stats;
-  }, [filteredTrades]);
+  }, [filteredTrades, sizingMode]);
 
   // Aggregate trades by month for the current year
   const monthlyStats = useMemo(() => {
@@ -230,6 +260,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       if (getYear(date) !== year) return;
 
       const monthIndex = getMonth(date);
+      const sizedPL = getSizedPL(trade, sizingMode);
 
       if (!stats.has(monthIndex)) {
         stats.set(monthIndex, {
@@ -245,7 +276,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       }
 
       const monthStat = stats.get(monthIndex)!;
-      monthStat.netPL += trade.pl;
+      monthStat.netPL += sizedPL;
       monthStat.tradeCount += 1;
       if (trade.pl > 0) monthStat.winCount += 1;
       if (trade.pl < 0) monthStat.lossCount += 1;
@@ -262,7 +293,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     });
 
     return stats;
-  }, [filteredTrades, currentDate]);
+  }, [filteredTrades, currentDate, sizingMode]);
 
   // Aggregate trades by year/month for the heatmap
   const yearlySnapshot = useMemo<YearlyCalendarSnapshot>(() => {
@@ -280,7 +311,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       const monthMap = yearMap.get(y)!;
       if (!monthMap.has(m)) monthMap.set(m, { netPL: 0, trades: 0, wins: 0, margin: 0 });
       const entry = monthMap.get(m)!;
-      entry.netPL += trade.pl;
+      const sizedPL = getSizedPL(trade, sizingMode);
+      entry.netPL += sizedPL;
       entry.trades += 1;
       if (trade.pl > 0) entry.wins += 1;
       entry.margin += trade.marginReq || 0;
@@ -321,7 +353,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       .sort((a, b) => b.year - a.year);
 
     return { years };
-  }, [filteredTrades]);
+  }, [filteredTrades, sizingMode]);
 
   // Calculate max margin for the current month to scale utilization bars
   const maxMarginForMonth = useMemo(() => {
@@ -616,6 +648,26 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
               onClick={() => setHeatmapMetric("rom")}
             >
               ROM%
+            </Button>
+          </div>
+
+          <div className="inline-flex items-center gap-2 rounded-full border bg-muted/40 p-1 text-xs">
+            <span className="text-[11px] text-muted-foreground px-2">Sizing</span>
+            <Button
+              size="sm"
+              variant={sizingMode === "actual" ? "default" : "ghost"}
+              className="h-6 px-3 rounded-full"
+              onClick={() => setSizingMode("actual")}
+            >
+              Actual
+            </Button>
+            <Button
+              size="sm"
+              variant={sizingMode === "normalized" ? "default" : "ghost"}
+              className="h-6 px-3 rounded-full"
+              onClick={() => setSizingMode("normalized")}
+            >
+              1-lot
             </Button>
           </div>
 
