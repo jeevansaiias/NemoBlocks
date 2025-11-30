@@ -11,7 +11,7 @@ interface WeekdayStat {
   romPct: number;
 }
 
-const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 
 export function WeekdayAlphaMap({
   stats,
