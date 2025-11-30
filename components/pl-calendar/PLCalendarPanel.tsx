@@ -37,8 +37,6 @@ import { PLCalendarSettingsMenu } from "./PLCalendarSettingsMenu";
 import { DailyDetailModal, DaySummary } from "./DayDetailModal";
 import { MonthlyPLCalendar } from "./MonthlyPLCalendar";
 import { YearHeatmap, YearlyCalendarSnapshot } from "./YearHeatmap";
-import { WeekdayAlphaMap } from "./WeekdayAlphaMap";
-import { StrategyCorrelationMatrix } from "./StrategyCorrelationMatrix";
 import { RomTrendChart } from "./RomTrendChart";
 import { MonthStats } from "./YearlyPLTable";
 
@@ -65,6 +63,12 @@ const getTradeLots = (trade: Trade) => {
   return lots > 0 ? lots : 1;
 };
 
+const getSizedPL = (trade: Trade, sizingMode: SizingMode) => {
+  if (sizingMode === "actual") return trade.pl;
+  const lots = getTradeLots(trade);
+  return trade.pl / lots;
+};
+
 const normalizeTradeDate = (trade: Trade): Date => {
   const base =
     trade.dateOpened instanceof Date
@@ -76,32 +80,6 @@ const normalizeTradeDate = (trade: Trade): Date => {
   const s = sRaw !== undefined && sRaw !== "" ? Number(sRaw) : 0;
   base.setHours(isNaN(h) ? 12 : h, isNaN(m) ? 0 : m, isNaN(s) ? 0 : s, 0);
   return base;
-};
-
-const getSizedPL = (trade: Trade, sizingMode: SizingMode) => {
-  if (sizingMode === "actual") return trade.pl;
-  const lots = getTradeLots(trade);
-  return trade.pl / lots;
-};
-
-const computePearson = (a: number[], b: number[]) => {
-  if (a.length !== b.length || a.length === 0) return 0;
-  const n = a.length;
-  const meanA = a.reduce((s, v) => s + v, 0) / n;
-  const meanB = b.reduce((s, v) => s + v, 0) / n;
-  let num = 0;
-  let denomA = 0;
-  let denomB = 0;
-  for (let i = 0; i < n; i++) {
-    const da = a[i] - meanA;
-    const db = b[i] - meanB;
-    num += da * db;
-    denomA += da * da;
-    denomB += db * db;
-  }
-  const denom = Math.sqrt(denomA * denomB);
-  if (denom === 0) return 0;
-  return num / denom;
 };
 
 const classifyRegime = (netPL: number, romPct: number | undefined): MarketRegime => {
@@ -144,8 +122,6 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   const [heatmapMetric, setHeatmapMetric] = useState<"pl" | "rom">("pl");
   const [sizingMode, setSizingMode] = useState<SizingMode>("actual");
   const { settings: calendarSettings, setSettings: setCalendarSettings } = usePLCalendarSettings();
-  const [showAlphaPanel, setShowAlphaPanel] = useState(true);
-  const [showCorrelationPanel, setShowCorrelationPanel] = useState(true);
   const [showRomTrendPanel, setShowRomTrendPanel] = useState(true);
 
   const strategies = useMemo(() => {
@@ -620,72 +596,6 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     setIsModalOpen(true);
   };
 
-  const weekdayAlpha = useMemo(() => {
-    const buckets = new Map<number, { pl: number; margin: number; wins: number; losses: number; trades: number }>();
-    filteredTrades.forEach((t) => {
-      const date = normalizeTradeDate(t);
-      const dow = date.getDay(); // 0=Sun ... 6=Sat
-      if (dow === 0 || dow === 6) return; // skip weekends
-      const idx = dow - 1; // Mon=0 ... Fri=4
-      const pl = getSizedPL(t, sizingMode);
-      const margin = t.marginReq ?? 0;
-      const bucket = buckets.get(idx) || { pl: 0, margin: 0, wins: 0, losses: 0, trades: 0 };
-      bucket.pl += pl;
-      bucket.margin += Math.max(0, margin);
-      if (pl > 0) bucket.wins += 1;
-      if (pl < 0) bucket.losses += 1;
-      bucket.trades += 1;
-      buckets.set(idx, bucket);
-    });
-    const ordered = [0, 1, 2, 3, 4].map((d) => {
-      const b = buckets.get(d) || { pl: 0, margin: 0, wins: 0, losses: 0, trades: 0 };
-      const winRate = b.trades > 0 ? (b.wins / b.trades) * 100 : 0;
-      const rom = b.margin > 0 ? (b.pl / b.margin) * 100 : 0;
-      return { weekday: d, ...b, winRate, romPct: rom };
-    });
-    return ordered;
-  }, [filteredTrades, sizingMode]);
-
-  const strategyCorr = useMemo(() => {
-    // build per-strategy daily PL map keyed by date
-    const byStrategy = new Map<string, Map<string, number>>();
-    filteredTrades.forEach((t) => {
-      const date = format(
-        t.dateOpened instanceof Date ? t.dateOpened : new Date(t.dateOpened),
-        "yyyy-MM-dd"
-      );
-      const strategy = t.strategy || "Custom";
-      const pl = getSizedPL(t, sizingMode);
-      if (!byStrategy.has(strategy)) byStrategy.set(strategy, new Map());
-      const m = byStrategy.get(strategy)!;
-      m.set(date, (m.get(date) ?? 0) + pl);
-    });
-
-    const strategiesList = Array.from(byStrategy.keys());
-    const allDates = new Set<string>();
-    byStrategy.forEach((m) => m.forEach((_, d) => allDates.add(d)));
-    const dates = Array.from(allDates).sort();
-
-    const series: Record<string, number[]> = {};
-    strategiesList.forEach((s) => {
-      const m = byStrategy.get(s)!;
-      series[s] = dates.map((d) => m.get(d) ?? 0);
-    });
-
-    const corrList: { a: string; b: string; corr: number }[] = [];
-    for (let i = 0; i < strategiesList.length; i++) {
-      for (let j = i; j < strategiesList.length; j++) {
-        const a = strategiesList[i];
-        const b = strategiesList[j];
-        const arrA = series[a];
-        const arrB = series[b];
-        const corr = computePearson(arrA, arrB);
-        corrList.push({ a, b, corr });
-      }
-    }
-    return { strategies: strategiesList, correlations: corrList };
-  }, [filteredTrades, sizingMode]);
-
   const romTrend = useMemo(() => {
     if (heatmapMetric !== "rom") return null;
     const days: { date: string; pl: number; margin: number }[] = [];
@@ -892,38 +802,6 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
               <TableIcon className="mr-2 h-4 w-4" />
               Print/PNG
             </Button>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm">
-                  Panels
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-56 text-xs">
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2">
-                    <Checkbox
-                      checked={showAlphaPanel}
-                      onCheckedChange={(v) => setShowAlphaPanel(!!v)}
-                    />
-                    <span>Weekday alpha</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <Checkbox
-                      checked={showCorrelationPanel}
-                      onCheckedChange={(v) => setShowCorrelationPanel(!!v)}
-                    />
-                    <span>Strategy correlation</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <Checkbox
-                      checked={showRomTrendPanel}
-                      onCheckedChange={(v) => setShowRomTrendPanel(!!v)}
-                    />
-                    <span>ROM trend</span>
-                  </label>
-                </div>
-              </PopoverContent>
-            </Popover>
           </div>
         </div>
       </div>
@@ -951,17 +829,6 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
               />
             )}
 
-            {showAlphaPanel && (
-              <WeekdayAlphaMap stats={weekdayAlpha} sizingMode={sizingMode} />
-            )}
-
-            {showCorrelationPanel && (
-              <StrategyCorrelationMatrix
-                trades={strategyCorr}
-                sizingMode={sizingMode}
-                metric={heatmapMetric}
-              />
-            )}
           </div>
         ) : (
           <div className="space-y-4">
