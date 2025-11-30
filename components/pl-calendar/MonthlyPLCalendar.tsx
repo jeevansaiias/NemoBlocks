@@ -93,8 +93,8 @@ export function MonthlyPLCalendar({
 
   const dayEntries = calendarDays.map((day) => {
     const dateKey = format(day, "yyyy-MM-dd");
-    const stats = dailyStats.get(dateKey);
     const isCurrentMonth = isSameMonth(day, monthStart);
+    const stats = isCurrentMonth ? dailyStats.get(dateKey) : undefined;
     const isDrawdown =
       stats && stats.drawdownPct !== undefined
         ? stats.drawdownPct <= -Math.abs(drawdownThreshold)
