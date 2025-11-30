@@ -94,6 +94,7 @@ export function MonthlyPLCalendar({
   const dayEntries = calendarDays.map((day) => {
     const dateKey = format(day, "yyyy-MM-dd");
     const isCurrentMonth = isSameMonth(day, monthStart);
+    // Only attach stats for dates that are part of the visible month; padding days stay empty.
     const stats = isCurrentMonth ? dailyStats.get(dateKey) : undefined;
     const isDrawdown =
       stats && stats.drawdownPct !== undefined
