@@ -127,12 +127,18 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       dayStat.maxMargin = Math.max(dayStat.maxMargin, trade.marginReq || 0);
       dayStat.marginUsed = (dayStat.marginUsed ?? 0) + (trade.marginReq || 0);
       
-      // Map Trade to DailyTrade
+      // Map Trade to DailyTrade, keeping the actual opened timestamp (date + time).
       const marginUsed = trade.marginReq || 0;
       const romPct = marginUsed > 0 ? (trade.pl / marginUsed) * 100 : undefined;
+      const openedAt = (() => {
+        const [h = "0", m = "0", s = "0"] = (trade.timeOpened || "00:00:00").split(":");
+        const dt = new Date(date);
+        dt.setHours(Number(h) || 0, Number(m) || 0, Number(s) || 0, 0);
+        return dt.toISOString();
+      })();
       dayStat.trades.push({
         id: undefined, // Trade model doesn't have ID
-        dateOpened: trade.dateOpened instanceof Date ? trade.dateOpened.toISOString() : trade.dateOpened,
+        dateOpened: openedAt,
         strategy: trade.strategy || "Custom",
         legs: trade.legs || "",
         premium: trade.premium || 0,
