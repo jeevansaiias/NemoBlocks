@@ -65,6 +65,19 @@ const getTradeLots = (trade: Trade) => {
   return lots > 0 ? lots : 1;
 };
 
+const normalizeTradeDate = (trade: Trade): Date => {
+  const base =
+    trade.dateOpened instanceof Date
+      ? new Date(trade.dateOpened.getTime())
+      : new Date(trade.dateOpened);
+  const [hRaw, mRaw, sRaw] = (trade.timeOpened || "").split(":");
+  const h = hRaw !== undefined && hRaw !== "" ? Number(hRaw) : 12;
+  const m = mRaw !== undefined && mRaw !== "" ? Number(mRaw) : 0;
+  const s = sRaw !== undefined && sRaw !== "" ? Number(sRaw) : 0;
+  base.setHours(isNaN(h) ? 12 : h, isNaN(m) ? 0 : m, isNaN(s) ? 0 : s, 0);
+  return base;
+};
+
 const getSizedPL = (trade: Trade, sizingMode: SizingMode) => {
   if (sizingMode === "actual") return trade.pl;
   const lots = getTradeLots(trade);
@@ -610,7 +623,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   const weekdayAlpha = useMemo(() => {
     const buckets = new Map<number, { pl: number; margin: number; wins: number; losses: number; trades: number }>();
     filteredTrades.forEach((t) => {
-      const date = t.dateOpened instanceof Date ? t.dateOpened : new Date(t.dateOpened);
+      const date = normalizeTradeDate(t);
       const dow = date.getDay(); // 0=Sun ... 6=Sat
       if (dow === 0 || dow === 6) return; // skip weekends
       const idx = dow - 1; // Mon=0 ... Fri=4
