@@ -26,6 +26,7 @@ interface MonthlyPLCalendarProps {
   maxMarginForPeriod: number;
   drawdownThreshold?: number;
   weeklyMode: "trailing7" | "calendarWeek";
+  heatmapMetric: "pl" | "rom";
   settings: import("@/lib/settings/pl-calendar-settings").PLCalendarSettings;
 }
 
@@ -37,6 +38,7 @@ export function MonthlyPLCalendar({
   maxMarginForPeriod,
   drawdownThreshold = 10,
   weeklyMode,
+  heatmapMetric,
   settings,
 }: MonthlyPLCalendarProps) {
   const safeSettings: PLCalendarSettings = {
@@ -65,11 +67,11 @@ export function MonthlyPLCalendar({
     return `${sign}$${abs.toFixed(0)}`;
   };
 
-  const getDailyPLClass = (pl: number, absMax: number) => {
-    if (!safeSettings.showHeatmap) return pl >= 0 ? "text-emerald-400" : "text-rose-400";
+  const getDailyPLClass = (metricValue: number, absMax: number) => {
+    if (!safeSettings.showHeatmap) return metricValue >= 0 ? "text-emerald-400" : "text-rose-400";
     if (absMax <= 0) return "";
-    const intensity = Math.min(1, Math.abs(pl) / absMax);
-    if (pl >= 0) {
+    const intensity = Math.min(1, Math.abs(metricValue) / absMax);
+    if (metricValue >= 0) {
       if (intensity < 0.33) return "text-emerald-300";
       if (intensity < 0.66) return "text-emerald-400";
       return "text-emerald-500";
@@ -112,9 +114,15 @@ export function MonthlyPLCalendar({
     };
   });
 
-  const absMaxDailyPL = Math.max(
+  const absMaxDailyMetric = Math.max(
     1,
-    ...dayEntries.map((e) => Math.abs(e.stats?.netPL ?? 0))
+    ...dayEntries.map((e) =>
+      Math.abs(
+        heatmapMetric === "rom"
+          ? e.stats?.romPct ?? 0
+          : e.stats?.netPL ?? 0
+      )
+    )
   );
 
   // chunk into weeks of 7
@@ -126,8 +134,17 @@ export function MonthlyPLCalendar({
   const weekPLs = weeks.map((week) =>
     week.reduce((sum, entry) => sum + (entry.stats?.netPL ?? 0), 0)
   );
+  const weekROMs = weeks.map((week) =>
+    week.reduce((sum, entry) => sum + (entry.stats?.romPct ?? 0), 0)
+  );
   const medianWeekPL = (() => {
     const vals = [...weekPLs].filter((v) => !Number.isNaN(v)).sort((a, b) => a - b);
+    if (vals.length === 0) return 0;
+    const mid = Math.floor(vals.length / 2);
+    return vals.length % 2 === 0 ? (vals[mid - 1] + vals[mid]) / 2 : vals[mid];
+  })();
+  const medianWeekROM = (() => {
+    const vals = [...weekROMs].filter((v) => !Number.isNaN(v)).sort((a, b) => a - b);
     if (vals.length === 0) return 0;
     const mid = Math.floor(vals.length / 2);
     return vals.length % 2 === 0 ? (vals[mid - 1] + vals[mid]) / 2 : vals[mid];
@@ -135,6 +152,10 @@ export function MonthlyPLCalendar({
   const maxWeekAbsPL =
     weekPLs.length > 0
       ? Math.max(1, ...weekPLs.map((v) => Math.abs(v)))
+      : 1;
+  const maxWeekAbsROM =
+    weekROMs.length > 0
+      ? Math.max(1, ...weekROMs.map((v) => Math.abs(v)))
       : 1;
 
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -177,10 +198,14 @@ export function MonthlyPLCalendar({
         <div className="space-y-1 bg-muted/20 p-1">
           {weeks.map((week, idx) => {
             const weekPL = weekPLs[idx];
+            const weekROM = weekROMs[idx];
+            const basisValue = heatmapMetric === "rom" ? weekROM : weekPL;
+            const medianBasis = heatmapMetric === "rom" ? medianWeekROM : medianWeekPL;
+            const maxWeekAbs = heatmapMetric === "rom" ? maxWeekAbsROM : maxWeekAbsPL;
             const regime =
-              weekPL > 2 * medianWeekPL
+              basisValue > 2 * medianBasis
                 ? "strong"
-                : weekPL < -1.5 * medianWeekPL
+                : basisValue < -1.5 * medianBasis
                 ? "weak"
                 : "normal";
             const weekBg =
@@ -223,6 +248,10 @@ export function MonthlyPLCalendar({
                 <div className="grid grid-cols-7 gap-[1px]">
                   {week.map((entry) => {
                     const { day, stats, isCurrentMonth, isDrawdown, utilization } = entry;
+                    const metricValue =
+                      heatmapMetric === "rom"
+                        ? stats?.romPct ?? 0
+                        : stats?.netPL ?? 0;
                     return (
                       <div
                         key={day.toString()}
@@ -266,10 +295,12 @@ export function MonthlyPLCalendar({
                       <div
                         className={cn(
                           "text-center text-sm font-bold",
-                          getDailyPLClass(stats.netPL, absMaxDailyPL)
+                          getDailyPLClass(metricValue, absMaxDailyMetric)
                         )}
                       >
-                        {formatCompactUsd(stats.netPL)}
+                        {heatmapMetric === "rom"
+                          ? `${(stats.romPct ?? 0).toFixed(1)}%`
+                          : formatCompactUsd(stats.netPL)}
                       </div>
                               <span className="text-[11px] text-muted-foreground">
                                 {weeklyMode === "trailing7" ? "7d" : "Wk"}{" "}
@@ -316,12 +347,16 @@ export function MonthlyPLCalendar({
                     <div
                       className={cn(
                         "h-1 rounded-full",
-                        weekPL > 0 ? "bg-emerald-500" : weekPL < 0 ? "bg-rose-500" : "bg-muted-foreground/60"
+                        basisValue > 0
+                          ? "bg-emerald-500"
+                          : basisValue < 0
+                          ? "bg-rose-500"
+                          : "bg-muted-foreground/60"
                       )}
                       style={{
                         width:
-                          maxWeekAbsPL > 0
-                            ? `${Math.min(100, (Math.abs(weekPL) / maxWeekAbsPL) * 100)}%`
+                          maxWeekAbs > 0
+                            ? `${Math.min(100, (Math.abs(basisValue) / maxWeekAbs) * 100)}%`
                             : "0%",
                       }}
                     />

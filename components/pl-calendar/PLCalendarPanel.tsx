@@ -60,6 +60,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     null
   );
   const [weeklyMode, setWeeklyMode] = useState<"trailing7" | "calendarWeek">("trailing7");
+  const [heatmapMetric, setHeatmapMetric] = useState<"pl" | "rom">("pl");
   const { settings: calendarSettings, setSettings: setCalendarSettings } = usePLCalendarSettings();
 
   const strategies = useMemo(() => {
@@ -559,6 +560,25 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
             </Button>
           </div>
 
+          <div className="inline-flex items-center rounded-full border bg-muted/40 p-1 text-xs">
+            <Button
+              size="sm"
+              variant={heatmapMetric === "pl" ? "default" : "ghost"}
+              className="h-6 px-3 rounded-full"
+              onClick={() => setHeatmapMetric("pl")}
+            >
+              P/L
+            </Button>
+            <Button
+              size="sm"
+              variant={heatmapMetric === "rom" ? "default" : "ghost"}
+              className="h-6 px-3 rounded-full"
+              onClick={() => setHeatmapMetric("rom")}
+            >
+              ROM%
+            </Button>
+          </div>
+
           <Select
             value={getYear(currentDate).toString()}
             onValueChange={(val) => {
@@ -630,6 +650,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
               maxMarginForPeriod={maxMarginForMonth}
               drawdownThreshold={drawdownThreshold}
               weeklyMode={weeklyMode}
+              heatmapMetric={heatmapMetric}
               settings={calendarSettings}
             />
 
