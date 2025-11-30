@@ -97,6 +97,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
           winRate: 0,
           winCount: 0,
           maxMargin: 0,
+          marginUsed: 0,
+          romPct: 0,
           trades: [],
         });
       }
@@ -106,16 +108,20 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       dayStat.tradeCount += 1;
       if (trade.pl > 0) dayStat.winCount += 1;
       dayStat.maxMargin = Math.max(dayStat.maxMargin, trade.marginReq || 0);
+      dayStat.marginUsed = (dayStat.marginUsed ?? 0) + (trade.marginReq || 0);
       
       // Map Trade to DailyTrade
+      const marginUsed = trade.marginReq || 0;
+      const romPct = marginUsed > 0 ? (trade.pl / marginUsed) * 100 : undefined;
       dayStat.trades.push({
         id: undefined, // Trade model doesn't have ID
         dateOpened: trade.dateOpened instanceof Date ? trade.dateOpened.toISOString() : trade.dateOpened,
         strategy: trade.strategy || "Custom",
         legs: trade.legs || "",
         premium: trade.premium || 0,
-        margin: trade.marginReq || 0,
-        pl: trade.pl
+        margin: marginUsed,
+        pl: trade.pl,
+        romPct,
       });
     });
     
@@ -126,6 +132,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
         stat.tradeCount > 0
           ? Math.round((wins / stat.tradeCount) * 100)
           : 0;
+      const dayMargin = stat.marginUsed ?? 0;
+      stat.romPct = dayMargin > 0 ? (stat.netPL / dayMargin) * 100 : 0;
     });
 
     // Compute cumulative equity and rolling drawdowns
@@ -408,6 +416,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
           winRate: 0,
           winCount: 0,
           maxMargin: 0,
+          marginUsed: 0,
+          romPct: 0,
           trades: [],
           dailyBreakdown: [],
         });
@@ -418,6 +428,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       weekStat.tradeCount += stat.tradeCount;
       weekStat.winCount += stat.winCount;
       weekStat.maxMargin = Math.max(weekStat.maxMargin, stat.maxMargin);
+      weekStat.marginUsed = (weekStat.marginUsed || 0) + (stat.marginUsed || 0);
       weekStat.trades.push(...stat.trades);
       weekStat.dailyBreakdown?.push({
         date: stat.date,
@@ -436,6 +447,10 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       week.winRate =
         week.tradeCount > 0
           ? Math.round((week.winCount / week.tradeCount) * 100)
+          : 0;
+      week.romPct =
+        (week.marginUsed ?? 0) > 0
+          ? (week.netPL / (week.marginUsed as number)) * 100
           : 0;
     });
 
@@ -748,11 +763,11 @@ function WeeklySummaryGrid({
                   {week.netPL >= 0 ? "+" : "-"}
                   {formatCompactUsd(Math.abs(week.netPL))}
                 </span>
-              </div>
+            </div>
 
-              <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-white/80">
-                <div className="rounded-lg bg-black/20 px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-white/50">Trades</div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-white/80">
+              <div className="rounded-lg bg-black/20 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wide text-white/50">Trades</div>
                   <div className="text-sm font-semibold">{week.tradeCount}</div>
                 </div>
                 <div className="rounded-lg bg-black/20 px-3 py-2">
@@ -760,16 +775,35 @@ function WeeklySummaryGrid({
                   <div className="text-sm font-semibold">{week.winRate}%</div>
                 </div>
                 <div className="rounded-lg bg-black/20 px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-white/50">Max Margin</div>
-                  <div className="text-sm font-semibold">
-                    {formatCompactUsd(week.maxMargin)}
-                  </div>
+                <div className="text-[10px] uppercase tracking-wide text-white/50">Max Margin</div>
+                <div className="text-sm font-semibold">
+                  {formatCompactUsd(week.maxMargin)}
                 </div>
               </div>
-            </button>
-          );
-        })}
-      </div>
+              <div className="rounded-lg bg-black/20 px-3 py-2 col-span-3 flex items-center justify-between">
+                <div className="text-[10px] uppercase tracking-wide text-white/50">
+                  Margin Used
+                </div>
+                <div className="text-sm font-semibold">
+                  {formatCompactUsd(week.marginUsed || 0)}
+                </div>
+                <div className="text-[10px] uppercase tracking-wide text-white/50">
+                  ROM
+                </div>
+                <div
+                  className={cn(
+                    "text-sm font-semibold",
+                    (week.romPct || 0) >= 0 ? "text-emerald-300" : "text-rose-300"
+                  )}
+                >
+                  {week.romPct !== undefined ? `${week.romPct.toFixed(1)}%` : "—"}
+                </div>
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
     </div>
   );
 }
