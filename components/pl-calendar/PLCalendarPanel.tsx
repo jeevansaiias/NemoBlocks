@@ -1,6 +1,7 @@
 "use client";
 
 // PLCalendarPanel: Main component for the P/L Calendar feature
+// Note: sizingMode now supports Kelly / Half-Kelly; keep this file as the single source of truth for sizing logic.
 import { endOfWeek, format, getISOWeek, getISOWeekYear, getMonth, getYear, startOfWeek } from "date-fns";
 import { Check, ChevronDown, Download, Filter, Table as TableIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
