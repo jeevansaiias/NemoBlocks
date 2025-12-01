@@ -63,11 +63,10 @@ const getTradeLots = (trade: Trade) => {
   return lots > 0 ? lots : 1;
 };
 
-const getSizedPL = (trade: Trade, sizingMode: SizingMode) => {
-  if (sizingMode === "actual") return trade.pl;
-  const lots = getTradeLots(trade);
-  return trade.pl / lots;
-};
+type SizingMode = "actual" | "normalized" | "kelly" | "halfKelly";
+
+const KELLY_MAX_FRACTION = 0.25;
+const KELLY_BASE_EQUITY = 100_000;
 
 const normalizeTradeDate = (trade: Trade): Date => {
   const base =
@@ -90,6 +89,102 @@ const classifyRegime = (netPL: number, romPct: number | undefined): MarketRegime
   return "CHOPPY";
 };
 
+const computeKellyFractions = (trades: Trade[]): Map<string, number> => {
+  const byStrategy = new Map<
+    string,
+    { wins: number; losses: number; winPL: number; lossPL: number }
+  >();
+  trades.forEach((t) => {
+    const key = t.strategy || "Custom";
+    const lots = getTradeLots(t);
+    const perLotPL = t.pl / lots;
+    if (!byStrategy.has(key)) {
+      byStrategy.set(key, { wins: 0, losses: 0, winPL: 0, lossPL: 0 });
+    }
+    const bucket = byStrategy.get(key)!;
+    if (perLotPL >= 0) {
+      bucket.wins += 1;
+      bucket.winPL += perLotPL;
+    } else {
+      bucket.losses += 1;
+      bucket.lossPL += Math.abs(perLotPL);
+    }
+  });
+
+  const fractions = new Map<string, number>();
+  byStrategy.forEach((b, key) => {
+    const total = b.wins + b.losses;
+    if (total === 0 || b.lossPL === 0) {
+      fractions.set(key, 0);
+      return;
+    }
+    const winRate = b.wins / total;
+    const avgWin = b.wins > 0 ? b.winPL / b.wins : 0;
+    const avgLoss = b.losses > 0 ? b.lossPL / b.losses : 0;
+    if (avgLoss === 0) {
+      fractions.set(key, 0);
+      return;
+    }
+    const R = avgWin / avgLoss;
+    if (R === 0) {
+      fractions.set(key, 0);
+      return;
+    }
+    let f = winRate - (1 - winRate) / R;
+    if (!isFinite(f) || f < 0) f = 0;
+    if (f > KELLY_MAX_FRACTION) f = KELLY_MAX_FRACTION;
+    fractions.set(key, f);
+  });
+  return fractions;
+};
+
+const computeSizedPLMap = (
+  trades: Trade[],
+  sizingMode: SizingMode,
+  baseEquity: number
+): Map<Trade, number> => {
+  const map = new Map<Trade, number>();
+  if (sizingMode === "actual" || sizingMode === "normalized") {
+    trades.forEach((t) => {
+      const lots = getTradeLots(t);
+      const sized =
+        sizingMode === "actual" ? t.pl : lots > 0 ? t.pl / lots : t.pl;
+      map.set(t, sized);
+    });
+    return map;
+  }
+
+  const fractions = computeKellyFractions(trades);
+  const sorted = [...trades].sort((a, b) => {
+    const da = normalizeTradeDate(a).getTime();
+    const db = normalizeTradeDate(b).getTime();
+    return da - db;
+  });
+  let equity = baseEquity;
+
+  sorted.forEach((t) => {
+    const lots = getTradeLots(t);
+    const perLotPL = lots > 0 ? t.pl / lots : t.pl;
+    const marginPerLot = lots > 0 ? (t.marginReq || 0) / lots : t.marginReq || 0;
+    const kBase = fractions.get(t.strategy || "Custom") ?? 0;
+    const k =
+      sizingMode === "kelly"
+        ? kBase
+        : sizingMode === "halfKelly"
+        ? kBase * 0.5
+        : 0;
+    const contracts =
+      k > 0 && marginPerLot > 0
+        ? Math.max(1, Math.floor((equity * k) / marginPerLot))
+        : 1;
+    const sizedPL = perLotPL * contracts;
+    equity += sizedPL;
+    map.set(t, sizedPL);
+  });
+
+  return map;
+};
+
 interface WeekSummary extends DaySummary {
   endDate: Date;
   dominantRegime?: MarketRegime;
@@ -102,8 +197,6 @@ type MarketRegime =
   | "CHOPPY"
   | "HIGH_IV"
   | "LOW_IV";
-
-type SizingMode = "actual" | "normalized";
 
 export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -122,7 +215,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   const [heatmapMetric, setHeatmapMetric] = useState<"pl" | "rom">("pl");
   const [sizingMode, setSizingMode] = useState<SizingMode>("actual");
   const { settings: calendarSettings, setSettings: setCalendarSettings } = usePLCalendarSettings();
-  const [showRomTrendPanel, setShowRomTrendPanel] = useState(true);
+  const [showRomTrendPanel] = useState(true);
 
   const strategies = useMemo(() => {
     const s = new Set<string>();
@@ -144,7 +237,12 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const saved = window.localStorage.getItem("plCalendarSizingMode");
-    if (saved === "actual" || saved === "normalized") {
+    if (
+      saved === "actual" ||
+      saved === "normalized" ||
+      saved === "kelly" ||
+      saved === "halfKelly"
+    ) {
       setSizingMode(saved);
     }
   }, []);
@@ -158,6 +256,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   // This useMemo calculates daily stats including win/loss counts and rolling metrics
   const dailyStats = useMemo(() => {
     const stats = new Map<string, DaySummary>();
+    const sizedPLMap = computeSizedPLMap(filteredTrades, sizingMode, KELLY_BASE_EQUITY);
 
     filteredTrades.forEach((trade) => {
       // Handle dateOpened which might be a Date object or string
@@ -182,7 +281,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       }
 
       const dayStat = stats.get(dateKey)!;
-      const sizedPL = getSizedPL(trade, sizingMode);
+      const sizedPL = sizedPLMap.get(trade) ?? trade.pl;
       dayStat.netPL += sizedPL;
       dayStat.tradeCount += 1;
       if (trade.pl > 0) dayStat.winCount += 1;
@@ -288,6 +387,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
   const monthlyStats = useMemo(() => {
     const stats = new Map<number, MonthStats>();
     const year = getYear(currentDate);
+    const sizedPLMap = computeSizedPLMap(filteredTrades, sizingMode, KELLY_BASE_EQUITY);
 
     filteredTrades.forEach((trade) => {
       const date = trade.dateOpened instanceof Date 
@@ -297,7 +397,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       if (getYear(date) !== year) return;
 
       const monthIndex = getMonth(date);
-      const sizedPL = getSizedPL(trade, sizingMode);
+      const sizedPL = sizedPLMap.get(trade) ?? trade.pl;
 
       if (!stats.has(monthIndex)) {
         stats.set(monthIndex, {
@@ -338,6 +438,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       number,
       Map<number, { netPL: number; trades: number; wins: number; margin: number }>
     >();
+    const sizedPLMap = computeSizedPLMap(filteredTrades, sizingMode, KELLY_BASE_EQUITY);
 
     filteredTrades.forEach((trade) => {
       const date = trade.dateOpened instanceof Date ? trade.dateOpened : new Date(trade.dateOpened);
@@ -348,7 +449,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       const monthMap = yearMap.get(y)!;
       if (!monthMap.has(m)) monthMap.set(m, { netPL: 0, trades: 0, wins: 0, margin: 0 });
       const entry = monthMap.get(m)!;
-      const sizedPL = getSizedPL(trade, sizingMode);
+      const sizedPL = sizedPLMap.get(trade) ?? trade.pl;
       entry.netPL += sizedPL;
       entry.trades += 1;
       if (trade.pl > 0) entry.wins += 1;
