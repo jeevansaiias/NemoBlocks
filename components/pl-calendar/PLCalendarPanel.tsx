@@ -854,6 +854,24 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
             >
               1-lot
             </Button>
+            <Button
+              size="sm"
+              variant={sizingMode === "kelly" ? "default" : "ghost"}
+              className="h-6 px-3 rounded-full"
+              onClick={() => setSizingMode("kelly")}
+              title="Kelly sizing based on strategy win/loss stats"
+            >
+              Kelly
+            </Button>
+            <Button
+              size="sm"
+              variant={sizingMode === "halfKelly" ? "default" : "ghost"}
+              className="h-6 px-3 rounded-full"
+              onClick={() => setSizingMode("halfKelly")}
+              title="Half-Kelly sizing for more conservative allocation"
+            >
+              1/2 Kelly
+            </Button>
           </div>
 
           <Select
