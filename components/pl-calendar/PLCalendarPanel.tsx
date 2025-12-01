@@ -772,7 +772,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Net P/L (All Data)
+              {view === "year" ? "Net P/L (All Data)" : "Monthly Net P/L"}
             </CardTitle>
             <span className="text-muted-foreground">$</span>
           </CardHeader>
@@ -780,10 +780,12 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
             <div
               className={cn(
                 "text-2xl font-bold",
-                allDataStats.totalPL >= 0 ? "text-emerald-500" : "text-rose-500"
+                (view === "year" ? allDataStats.totalPL : periodStats.netPL) >= 0
+                  ? "text-emerald-500"
+                  : "text-rose-500"
               )}
             >
-              {formatCompactUsd(allDataStats.totalPL)}
+              {formatCompactUsd(view === "year" ? allDataStats.totalPL : periodStats.netPL)}
             </div>
           </CardContent>
         </Card>
