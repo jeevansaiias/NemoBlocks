@@ -18,7 +18,7 @@ export function WeekdayAlphaMap({
   sizingMode,
 }: {
   stats: WeekdayStat[];
-  sizingMode: "actual" | "normalized";
+  sizingMode: "actual" | "normalized" | "kelly" | "halfKelly";
 }) {
   const data: WeekdayStat[] = stats ?? [];
 

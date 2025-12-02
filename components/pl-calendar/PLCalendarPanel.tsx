@@ -40,6 +40,7 @@ import { MonthlyPLCalendar } from "./MonthlyPLCalendar";
 import { YearHeatmap, YearlyCalendarSnapshot } from "./YearHeatmap";
 import { RomTrendChart } from "./RomTrendChart";
 import { MonthStats } from "./YearlyPLTable";
+import { WeekdayAlphaMap } from "./WeekdayAlphaMap";
 
 interface PLCalendarPanelProps {
   trades: Trade[];
@@ -729,6 +730,46 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     );
   }, [dailyStats, currentDate]);
 
+  const weekdayAlpha = useMemo(() => {
+    const buckets = Array.from({ length: 5 }, (_, idx) => ({
+      weekday: idx,
+      pl: 0,
+      margin: 0,
+      trades: 0,
+      wins: 0,
+      romPct: 0,
+      winRate: 0,
+    }));
+
+    const sizedPLMap = computeSizedPLMap(filteredTrades, sizingMode, KELLY_BASE_EQUITY, kellyFraction);
+
+    filteredTrades.forEach((t) => {
+      const dateKey = getTradingDateKey(t);
+      const d = new Date(dateKey);
+      const dow = d.getDay();
+      if (dow === 0 || dow === 6) return; // skip weekends
+      const idx = dow - 1; // Mon -> 0
+      const lots = getTradeLots(t);
+      const marginUsed =
+        sizingMode === "normalized" && lots > 0
+          ? (t.marginReq || 0) / lots
+          : t.marginReq || 0;
+      const sizedPL = sizedPLMap.get(t) ?? t.pl;
+      const bucket = buckets[idx];
+      bucket.pl += sizedPL;
+      bucket.margin += Math.max(0, marginUsed);
+      bucket.trades += 1;
+      if (t.pl > 0) bucket.wins += 1;
+    });
+
+    buckets.forEach((b) => {
+      b.romPct = b.margin > 0 ? (b.pl / b.margin) * 100 : 0;
+      b.winRate = b.trades > 0 ? (b.wins / b.trades) * 100 : 0;
+    });
+
+    return buckets.filter((b) => b.trades > 0);
+  }, [filteredTrades, sizingMode, kellyFraction]);
+
   const handleDayClick = (stats: DaySummary) => {
     setSelectedDayStats(stats);
     setModalMode("day");
@@ -1011,6 +1052,9 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
                 weeks={weeklyStats}
                 onWeekClick={handleWeekClick}
               />
+            )}
+            {weekdayAlpha.length > 0 && (
+              <WeekdayAlphaMap stats={weekdayAlpha} sizingMode={sizingMode} />
             )}
 
           </div>

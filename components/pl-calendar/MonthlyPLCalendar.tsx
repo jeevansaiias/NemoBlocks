@@ -161,7 +161,7 @@ export function MonthlyPLCalendar({
       ? Math.max(1, ...weekROMs.map((v) => Math.abs(v)))
       : 1;
 
-  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 
   const handlePrevMonth = () => {
     const newDate = new Date(currentDate);
@@ -191,7 +191,7 @@ export function MonthlyPLCalendar({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-7 gap-px bg-muted/20 text-center text-sm font-medium text-muted-foreground">
+        <div className="grid grid-cols-5 gap-px bg-muted/20 text-center text-sm font-medium text-muted-foreground">
           {weekDays.map((day) => (
             <div key={day} className="py-2">
               {day}
@@ -200,6 +200,10 @@ export function MonthlyPLCalendar({
         </div>
         <div className="space-y-1 bg-muted/20 p-1">
           {weeks.map((week, idx) => {
+            const filteredWeek = week.filter((entry) => {
+              const dow = entry.day.getDay();
+              return dow >= 1 && dow <= 5; // Mon-Fri only
+            });
             const weekPL = weekPLs[idx];
             const weekROM = weekROMs[idx];
             const basisValue = heatmapMetric === "rom" ? weekROM : weekPL;
@@ -248,8 +252,8 @@ export function MonthlyPLCalendar({
                 key={`week-${idx}`}
                 className={cn("rounded-xl px-1 pt-1 pb-1.5 transition-colors", weekBg)}
               >
-                <div className="grid grid-cols-7 gap-[1px]">
-                  {week.map((entry) => {
+                <div className="grid grid-cols-5 gap-[1px]">
+                  {filteredWeek.map((entry) => {
                     const { day, stats, isCurrentMonth, utilization } = entry;
                     const metricValue =
                       heatmapMetric === "rom"
