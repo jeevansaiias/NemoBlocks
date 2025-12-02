@@ -150,27 +150,17 @@ const getTradingDateKey = (trade: Trade): string => {
   const h = hRaw !== undefined && hRaw !== "" ? Number(hRaw) : 12;
   const m = mRaw !== undefined && mRaw !== "" ? Number(mRaw) : 0;
   const s = sRaw !== undefined && sRaw !== "" ? Number(sRaw) : 0;
-  // Build a UTC anchor at midday to avoid TZ shifts when formatting.
-  const utc = Date.UTC(
-    base.getFullYear(),
-    base.getMonth(),
-    base.getDate(),
-    isNaN(h) ? 12 : h,
-    isNaN(m) ? 0 : m,
-    isNaN(s) ? 0 : s,
-    0
-  );
-  const anchored = new Date(utc);
+  // Build a local anchor at midday to avoid backward shifts, then normalize weekends to Friday.
+  base.setHours(isNaN(h) ? 12 : h, isNaN(m) ? 0 : m, isNaN(s) ? 0 : s, 0);
 
-  // If the open lands on a weekend, attribute it to the prior Friday to keep the calendar clean.
-  const dow = anchored.getUTCDay(); // 0 = Sun, 6 = Sat
+  const dow = base.getDay(); // 0 = Sun, 6 = Sat
   if (dow === 0) {
-    anchored.setUTCDate(anchored.getUTCDate() - 2);
+    base.setDate(base.getDate() - 2);
   } else if (dow === 6) {
-    anchored.setUTCDate(anchored.getUTCDate() - 1);
+    base.setDate(base.getDate() - 1);
   }
 
-  return anchored.toISOString().slice(0, 10); // yyyy-MM-dd in UTC to avoid local drift
+  return format(base, "yyyy-MM-dd"); // local calendar day
 };
 
 const computeSizedPLMap = (
