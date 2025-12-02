@@ -299,7 +299,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
 
     filteredTrades.forEach((trade) => {
       const dateKey = getTradingDateKey(trade);
-      const date = new Date(dateKey);
+      // Force local noon so the date cannot shift backwards in user timezones.
+      const date = new Date(`${dateKey}T12:00:00`);
 
       if (!stats.has(dateKey)) {
         stats.set(dateKey, {
@@ -379,8 +380,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       // rolling 7-day return
       rollingWindow.push(key);
       while (rollingWindow.length > 0) {
-        const first = new Date(rollingWindow[0]);
-        const current = new Date(key);
+      const first = new Date(`${rollingWindow[0]}T12:00:00`);
+        const current = new Date(`${key}T12:00:00`);
         if ((current.getTime() - first.getTime()) / (1000 * 60 * 60 * 24) > 6) {
           rollingWindow.shift();
         } else {
@@ -392,7 +393,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       stat.rollingWeeklyPL = rollingSum;
 
       // calendar week aggregation
-      const d = new Date(key);
+      const d = new Date(`${key}T12:00:00`);
       const weekKey = `${getISOWeekYear(d)}-${getISOWeek(d)}`;
       weekMap.set(weekKey, (weekMap.get(weekKey) ?? 0) + stat.netPL);
 
@@ -411,7 +412,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     // assign calendarWeekPL
     sortedKeys.forEach((key) => {
       const stat = stats.get(key)!;
-      const d = new Date(key);
+      const d = new Date(`${key}T12:00:00`);
       const weekKey = `${getISOWeekYear(d)}-${getISOWeek(d)}`;
       stat.calendarWeekPL = weekMap.get(weekKey) ?? 0;
     });
