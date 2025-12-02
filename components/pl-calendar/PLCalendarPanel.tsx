@@ -140,6 +140,7 @@ const computeKellyFractions = (trades: Trade[]): Map<string, number> => {
 };
 
 const getTradingDateKey = (trade: Trade): string => {
+  // Use a local trading-day key so weekday alignment matches the Monday-start grid.
   const base =
     trade.dateOpened instanceof Date
       ? new Date(trade.dateOpened.getTime())
@@ -148,18 +149,8 @@ const getTradingDateKey = (trade: Trade): string => {
   const h = hRaw !== undefined && hRaw !== "" ? Number(hRaw) : 12;
   const m = mRaw !== undefined && mRaw !== "" ? Number(mRaw) : 0;
   const s = sRaw !== undefined && sRaw !== "" ? Number(sRaw) : 0;
-  // Build a UTC-normalized date to avoid TZ drift; use midnight if no time is provided.
-  const utcDate = new Date(
-    Date.UTC(
-      base.getFullYear(),
-      base.getMonth(),
-      base.getDate(),
-      isNaN(h) ? 12 : h,
-      isNaN(m) ? 0 : m,
-      isNaN(s) ? 0 : s
-    )
-  );
-  return utcDate.toISOString().slice(0, 10); // yyyy-MM-dd
+  base.setHours(isNaN(h) ? 12 : h, isNaN(m) ? 0 : m, isNaN(s) ? 0 : s, 0);
+  return format(base, "yyyy-MM-dd");
 };
 
 const computeSizedPLMap = (
