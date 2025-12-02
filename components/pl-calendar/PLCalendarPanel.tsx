@@ -2,7 +2,7 @@
 
 // PLCalendarPanel: Main component for the P/L Calendar feature
 // Note: sizingMode now supports Kelly / Half-Kelly; keep this file as the single source of truth for sizing logic.
-import { endOfWeek, format, getISOWeek, getISOWeekYear, getMonth, getYear, startOfWeek } from "date-fns";
+import { endOfWeek, format, getISOWeek, getISOWeekYear, getMonth, getYear, parseISO, startOfWeek } from "date-fns";
 import { utcToZonedTime } from "date-fns-tz";
 import { Check, ChevronDown, Download, Filter, Table as TableIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -141,8 +141,7 @@ const computeKellyFractions = (trades: Trade[]): Map<string, number> => {
   return fractions;
 };
 
-// Trading-day key must stay in lockstep with the Monday-start grid to avoid weekday drift.
-// Use the OPEN timestamp as the source of truth (per user request) and avoid weekend placement.
+// Trading-day key helper: always returns a pure yyyy-MM-dd string in market TZ (America/New_York).
 const getTradingDateKey = (trade: Trade): string => {
   const rawDate = trade.dateOpened as Date;
   const base =
@@ -151,7 +150,6 @@ const getTradingDateKey = (trade: Trade): string => {
   const h = hRaw !== undefined && hRaw !== "" ? Number(hRaw) : 12;
   const m = mRaw !== undefined && mRaw !== "" ? Number(mRaw) : 0;
   const s = sRaw !== undefined && sRaw !== "" ? Number(sRaw) : 0;
-  // Build a local anchor at midday to avoid backward shifts.
   base.setHours(isNaN(h) ? 12 : h, isNaN(m) ? 0 : m, isNaN(s) ? 0 : s, 0);
 
   // Normalize to market timezone (ET) before extracting the calendar day to avoid TZ drift.
@@ -295,11 +293,12 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
 
     filteredTrades.forEach((trade) => {
       const dateKey = getTradingDateKey(trade);
-      // Force local noon so the date cannot shift backwards in user timezones.
-      const date = new Date(`${dateKey}T12:00:00`);
+      // Use pure dayKey for identity; derive a display Date via parseISO.
+      const date = parseISO(dateKey);
 
       if (!stats.has(dateKey)) {
         stats.set(dateKey, {
+          dayKey: dateKey,
           date: date,
           netPL: 0,
           tradeCount: 0,
@@ -377,8 +376,8 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       // rolling 7-day return
       rollingWindow.push(key);
       while (rollingWindow.length > 0) {
-      const first = new Date(`${rollingWindow[0]}T12:00:00`);
-        const current = new Date(`${key}T12:00:00`);
+        const first = parseISO(rollingWindow[0]);
+        const current = parseISO(key);
         if ((current.getTime() - first.getTime()) / (1000 * 60 * 60 * 24) > 6) {
           rollingWindow.shift();
         } else {
@@ -390,7 +389,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
       stat.rollingWeeklyPL = rollingSum;
 
       // calendar week aggregation
-      const d = new Date(`${key}T12:00:00`);
+      const d = parseISO(key);
       const weekKey = `${getISOWeekYear(d)}-${getISOWeek(d)}`;
       weekMap.set(weekKey, (weekMap.get(weekKey) ?? 0) + stat.netPL);
 
@@ -409,7 +408,7 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     // assign calendarWeekPL
     sortedKeys.forEach((key) => {
       const stat = stats.get(key)!;
-      const d = new Date(`${key}T12:00:00`);
+      const d = parseISO(key);
       const weekKey = `${getISOWeekYear(d)}-${getISOWeek(d)}`;
       stat.calendarWeekPL = weekMap.get(weekKey) ?? 0;
     });
