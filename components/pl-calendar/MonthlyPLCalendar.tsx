@@ -84,8 +84,9 @@ export function MonthlyPLCalendar({
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
   // Align calendar grid to Sunday start to match the visual header.
-  const startDate = startOfWeek(monthStart, { weekStartsOn: 0 });
-  const endDate = endOfWeek(monthEnd);
+  // Monday-start calendar to align with trading week
+  const startDate = startOfWeek(monthStart, { weekStartsOn: 1 });
+  const endDate = endOfWeek(monthEnd, { weekStartsOn: 1 });
 
   const calendarDays = eachDayOfInterval({
     start: startDate,
@@ -160,7 +161,7 @@ export function MonthlyPLCalendar({
       ? Math.max(1, ...weekROMs.map((v) => Math.abs(v)))
       : 1;
 
-  const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   const handlePrevMonth = () => {
     const newDate = new Date(currentDate);

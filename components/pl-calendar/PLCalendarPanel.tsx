@@ -632,9 +632,9 @@ export function PLCalendarPanel({ trades }: PLCalendarPanelProps) {
     dailyStats.forEach((stat, dateKey) => {
       if (!dateKey.startsWith(currentMonthStr)) return;
 
-      // Ensure week rows align with Sunday-start calendar grid
-      const weekStart = startOfWeek(stat.date, { weekStartsOn: 0 });
-      const weekEnd = endOfWeek(stat.date);
+      // Ensure week rows align with Monday-start calendar grid
+      const weekStart = startOfWeek(stat.date, { weekStartsOn: 1 });
+      const weekEnd = endOfWeek(stat.date, { weekStartsOn: 1 });
       const weekKey = format(weekStart, "yyyy-MM-dd");
 
       if (!weeks.has(weekKey)) {
