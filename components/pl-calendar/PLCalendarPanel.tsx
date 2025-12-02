@@ -139,8 +139,8 @@ const computeKellyFractions = (trades: Trade[]): Map<string, number> => {
   return fractions;
 };
 
+// Trading-day key must stay in lockstep with the Monday-start grid to avoid weekday drift.
 const getTradingDateKey = (trade: Trade): string => {
-  // Use a local trading-day key so weekday alignment matches the Monday-start grid.
   const base =
     trade.dateOpened instanceof Date
       ? new Date(trade.dateOpened.getTime())
